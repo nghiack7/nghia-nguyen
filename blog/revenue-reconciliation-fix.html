@@ -849,9 +849,6 @@ flowchart TD
     W["Write to MongoDB\n(upsert, idempotent)"]
 
     E --> D --> F --> C --> W
-
-    style C fill:#1e293b,color:#f0f0f0,stroke:rgba(255,255,255,0.14)
-    style F fill:#1e293b,color:#f0f0f0,stroke:rgba(255,255,255,0.14)
           </div>
           <div class="diagram-caption">New approach: recalculate from source of truth on every event</div>
         </div>
