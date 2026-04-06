@@ -1166,30 +1166,47 @@ func (j *ReconciliationJob) checkShop(ctx context.Context, shop Shop, days int) 
 
         <p>I was fairly proud of this. Clean code, proper sampling, alerting on drift. I opened the PR and waited for approval.</p>
 
-        <p>The feedback was not what I expected.</p>
+        <p>It got rejected. Not because of a technical flaw. Not because of operational trade-offs. The tech lead simply didn't agree with the approach — he believed the existing incremental logic could be patched further, and that a full reconciliation was overkill.</p>
 
         <div class="warning-banner">
           <div class="banner-icon">!</div>
           <div>
-            <div class="banner-title">Code Review Feedback</div>
-            <div class="banner-body">The reconciliation job was rejected — not because the code was wrong, but because of operational trade-offs the team wasn't willing to accept.</div>
+            <div class="banner-title">PR Rejected</div>
+            <div class="banner-body">The reconciliation job and the source-of-truth approach were rejected. The tech lead chose to continue patching the existing incremental calculation instead.</div>
           </div>
         </div>
 
-        <p>The concerns raised in review:</p>
+        <p>I explained the context. The incremental approach had accumulated 18 months of patches — each one fixing a symptom while introducing new edge cases. The root problem was architectural: you can't reliably compute financial totals from deltas when the deltas themselves are unreliable (missed webhooks, out-of-order events, partial data).</p>
+
+        <p>The response was firm: rejected. I closed the PR and moved on.</p>
+
+        <h3 id="aftermath">What Happened Next</h3>
+
+        <p>Over the next two weeks, the tech lead attempted to fix the revenue accuracy himself using the incremental patching approach. What followed was... educational.</p>
+
+        <div class="warning-banner" style="border-left-color: var(--red);">
+          <div class="banner-icon" style="background: var(--red-dim); color: var(--red);">!</div>
+          <div>
+            <div class="banner-title">Production Incident — March 20, 2026</div>
+            <div class="banner-body">A code deployment disrupted the sync and sales report calculation pipeline. An attempted fix was executed incorrectly, causing further data inaccuracies and synchronization failures.</div>
+          </div>
+        </div>
+
+        <p>The <a href="https://trueprofit-status.pages.dev/" target="_blank" class="author-link">public status page</a> tells the story. Over those two weeks:</p>
 
         <ul>
-          <li><strong>Shopify API cost</strong> — fetching orders for 5% of shops every day means thousands of Shopify API calls daily. Shopify's REST API has per-shop rate limits (40 req/s on standard plan, 2 req/s on basic). For shops with large order volumes, fetching 7 days of orders could exhaust their rate limit budget and impact the real-time webhook processing path.</li>
-          <li><strong>Database read amplification</strong> — the reconciliation job queries both Shopify and MongoDB for each shop-day combination. At our scale, this adds significant read load to MongoDB at a time we were already discussing sharding.</li>
-          <li><strong>False positive fatigue</strong> — the reviewer pointed out that minor discrepancies could arise from valid timing windows: an order at 11:59pm that arrives in our queue at 12:01am. The 0.1% threshold might generate noisy alerts that the team would start ignoring.</li>
-          <li><strong>Maintenance burden</strong> — another Lambda to deploy, monitor, and debug. The team's philosophy was "the fix should make the safety net unnecessary, not add infrastructure to paper over the fix."</li>
+          <li><strong>13 production releases</strong> deployed trying to fix cascading issues</li>
+          <li><strong>Ghost/phantom records</strong> inflated merchant sales by $5K–$20K per shop</li>
+          <li><strong>357,000 historical records</strong> had to be backfilled due to missing refund timestamps</li>
+          <li><strong>Duplicate report entries</strong> created by race conditions in the patched sync logic</li>
+          <li><strong>Discount allocation gaps</strong> introduced by yet another incremental patch</li>
         </ul>
 
-        <p>Honestly? These were fair points. I pushed back on the rate limit concern — we could throttle the job to run over 6 hours instead of all at once, respecting per-shop limits. But the broader argument — that a well-implemented idempotent recalculation from source of truth shouldn't need an external verifier — was harder to argue against.</p>
+        <p>Each patch fixed one symptom and introduced another. The exact failure mode I had warned about.</p>
 
-        <p>The core fix was solid. The revenue numbers were now correct. The reconciliation job would have been a nice safety net, but it added complexity that the team judged wasn't worth the cost given that the root causes were addressed.</p>
+        <p>After two weeks of firefighting, the team quietly adopted the same approach I had proposed: <strong>recalculate from source of truth</strong>. Fetch raw order data from Shopify, compute totals from scratch, replace the stored values. The status page even mentions "a comprehensive redesign leveraging Shopify's Agreements API" — which is essentially what my PR did, with a different API surface.</p>
 
-        <p>I closed the PR. I still think a lightweight version of that job would be valuable — maybe sampling 1% of shops, running weekly, with higher alert thresholds. But that's a conversation for after the fix has run stable for a few months. Right now, the numbers are right. That's what matters.</p>
+        <p>I'm not bitter about it. This happens in engineering teams more often than we like to admit. Sometimes the decision-maker doesn't have full context. Sometimes ego gets in the way of evaluating a solution on its technical merits. The important thing is: the right solution won in the end. It just took two extra weeks of production pain to get there.</p>
 
         <hr />
 
@@ -1300,8 +1317,8 @@ func (j *ReconciliationJob) checkShop(ctx context.Context, shop Shop, days int) 
           <div class="takeaway-card">
             <div class="takeaway-num">07</div>
             <div class="takeaway-content">
-              <strong>Sometimes the right engineering decision gets rejected — and that's OK</strong>
-              <p>The reconciliation job was solid engineering. It got rejected for legitimate operational reasons. I defended it with data, the team made a call, and we moved on. Not every good idea makes it to production. What matters is that the core problem was solved correctly.</p>
+              <strong>The right solution wins eventually — even if it gets rejected first</strong>
+              <p>My source-of-truth approach was rejected. Two weeks and 13 production releases later, the team adopted the same approach. Don't let ego — yours or someone else's — delay the correct fix. Defend your solution with data, and if you're overruled, let reality do the convincing.</p>
             </div>
           </div>
         </div>
@@ -1344,18 +1361,30 @@ func (j *ReconciliationJob) checkShop(ctx context.Context, shop Shop, days int) 
           <div class="tl-item">
             <div class="tl-dot neutral"></div>
             <div class="tl-date">Week 4</div>
-            <div class="tl-event">Reconciliation job PR opened.</div>
-            <div class="tl-impact">Proactive drift detection via daily sampling of 5% of active shops. Clean implementation.</div>
+            <div class="tl-event">Source-of-truth approach + reconciliation job PR opened.</div>
+            <div class="tl-impact">Complete solution: recalculate from raw Shopify data + proactive drift detection. Clean implementation, full test coverage.</div>
           </div>
           <div class="tl-item">
             <div class="tl-dot phase-1"></div>
             <div class="tl-date">Week 4</div>
-            <div class="tl-event">Reconciliation job rejected in review.</div>
-            <div class="tl-impact">API cost, DB read amplification, false positive risk, and maintenance burden. Team verdict: the fix itself should be the guarantee. PR closed.</div>
+            <div class="tl-event">PR rejected by tech lead.</div>
+            <div class="tl-impact">Tech lead chose to continue with incremental patching approach instead. PR closed.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-1"></div>
+            <div class="tl-date">Week 5–6</div>
+            <div class="tl-event">Production incident: 13 releases, ghost records, 357K backfills.</div>
+            <div class="tl-impact">Incremental patches caused cascading failures. Ghost records inflated sales $5K–$20K per shop. <a href="https://trueprofit-status.pages.dev/" target="_blank" class="author-link">Public status page</a> documented the chaos.</div>
           </div>
           <div class="tl-item">
             <div class="tl-dot phase-3"></div>
-            <div class="tl-date">Week 6+</div>
+            <div class="tl-date">Week 7</div>
+            <div class="tl-event">Team adopts source-of-truth approach.</div>
+            <div class="tl-impact">The same recalculation-from-raw-data strategy from the rejected PR. Revenue accuracy restored to 100%.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-3"></div>
+            <div class="tl-date">Week 8+</div>
             <div class="tl-event">Zero merchant revenue discrepancy tickets.</div>
             <div class="tl-impact">Revenue numbers stable. Trust rebuilt. System running correctly on idempotent source-of-truth recalculation.</div>
           </div>
