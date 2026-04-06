@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>How I Fixed a 100M+ Message Pipeline Bottleneck and Recurring OOM Crashes — Nghia Nguyen</title>
-  <meta name="description" content="Lessons from debugging unbounded concurrency, memory leaks, and backpressure in a high-throughput Go event processor." />
+  <title>From 100M Stuck Messages to Zero OOM: A 7-Month War with a Go Event Pipeline — Nghia Nguyen</title>
+  <meta name="description" content="Three phases of debugging unbounded concurrency, memory leaks, and backpressure in a high-throughput Go/Kafka event processor for Shopify merchants." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap" rel="stylesheet" />
@@ -14,7 +14,6 @@
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-go.min.js"></script>
 
   <style>
-    /* ─── Reset ─── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -35,6 +34,8 @@
       --green-dim: rgba(34,197,94,0.1);
       --red: #ef4444;
       --red-dim: rgba(239,68,68,0.1);
+      --orange: #f97316;
+      --orange-dim: rgba(249,115,22,0.1);
       --radius: 12px;
       --radius-sm: 8px;
       --nav-h: 60px;
@@ -60,6 +61,8 @@
       --green-dim: rgba(22,163,74,0.08);
       --red: #dc2626;
       --red-dim: rgba(220,38,38,0.08);
+      --orange: #ea580c;
+      --orange-dim: rgba(234,88,12,0.08);
     }
 
     html { scroll-behavior: smooth; }
@@ -75,12 +78,10 @@
     }
 
     ::selection { background: var(--accent); color: #fff; }
-
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
     ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
 
-    /* ─── Noise overlay ─── */
     body::before {
       content: '';
       position: fixed;
@@ -91,7 +92,7 @@
       opacity: 0.4;
     }
 
-    /* ─── Nav ─── */
+    /* Nav */
     nav {
       position: fixed;
       top: 0; left: 0; right: 0;
@@ -107,41 +108,19 @@
       gap: 16px;
       transition: background 0.25s;
     }
-
-    [data-theme="light"] nav {
-      background: rgba(250,250,250,0.88);
-    }
+    [data-theme="light"] nav { background: rgba(250,250,250,0.88); }
 
     .nav-back {
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      display: flex; align-items: center; gap: 6px;
       color: var(--text-muted);
       text-decoration: none;
-      font-size: 13px;
-      font-weight: 500;
-      letter-spacing: 0.01em;
+      font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
       transition: color 0.2s;
     }
     .nav-back:hover { color: var(--accent); }
     .nav-back svg { width: 14px; height: 14px; }
-
-    .nav-sep {
-      width: 1px;
-      height: 16px;
-      background: var(--border-strong);
-    }
-
-    .nav-title {
-      font-size: 13px;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      flex: 1;
-      max-width: 480px;
-    }
-
+    .nav-sep { width: 1px; height: 16px; background: var(--border-strong); }
+    .nav-title { font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; max-width: 480px; }
     .nav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
     .theme-btn {
@@ -157,7 +136,7 @@
     .theme-btn:hover { background: var(--bg-4); color: var(--text); border-color: var(--border-strong); }
     .theme-btn svg { width: 16px; height: 16px; }
 
-    /* ─── Layout ─── */
+    /* Layout */
     .page-wrapper {
       display: flex;
       max-width: 1200px;
@@ -170,7 +149,7 @@
       z-index: 1;
     }
 
-    /* ─── TOC Sidebar ─── */
+    /* TOC Sidebar */
     .toc-sidebar {
       width: var(--toc-w);
       flex-shrink: 0;
@@ -182,29 +161,14 @@
       display: flex;
       flex-direction: column;
     }
-
     .toc-label {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      margin-bottom: 12px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-dim); margin-bottom: 12px;
     }
-
-    .toc-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
+    .toc-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
     .toc-list a {
-      display: block;
-      font-size: 12.5px;
-      color: var(--text-muted);
-      text-decoration: none;
-      padding: 5px 10px;
+      display: block; font-size: 12.5px; color: var(--text-muted);
+      text-decoration: none; padding: 5px 10px;
       border-left: 2px solid transparent;
       border-radius: 0 4px 4px 0;
       transition: color 0.15s, border-color 0.15s, background 0.15s;
@@ -212,10 +176,9 @@
     }
     .toc-list a:hover { color: var(--text); border-left-color: var(--border-strong); }
     .toc-list a.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
-
     .toc-list .toc-sub a { padding-left: 20px; font-size: 12px; }
 
-    /* ─── Mobile TOC toggle ─── */
+    /* Mobile TOC */
     .toc-mobile-toggle {
       display: none;
       width: 100%;
@@ -235,700 +198,684 @@
     .toc-mobile-toggle:hover { background: var(--bg-4); }
     .toc-mobile-toggle svg { width: 14px; height: 14px; margin-left: auto; transition: transform 0.2s; }
     .toc-mobile-toggle.open svg { transform: rotate(180deg); }
-
-    .toc-mobile-panel {
-      display: none;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 12px 0;
-      margin-bottom: 24px;
-    }
+    .toc-mobile-panel { display: none; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 0; margin-bottom: 24px; }
     .toc-mobile-panel.open { display: block; }
 
-    /* ─── Main Article ─── */
+    /* Article */
     .article-main {
-      flex: 1;
-      min-width: 0;
-      padding-top: 40px;
-      padding-bottom: 80px;
+      flex: 1; min-width: 0;
+      padding-top: 40px; padding-bottom: 80px;
       max-width: var(--content-max);
     }
 
-    /* ─── Hero ─── */
-    .article-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 20px;
-    }
-
+    /* Hero */
+    .article-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
     .tag {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      padding: 3px 9px;
-      border-radius: 100px;
-      background: var(--accent-dim);
-      color: var(--accent);
+      font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+      text-transform: uppercase; padding: 3px 9px; border-radius: 100px;
+      background: var(--accent-dim); color: var(--accent);
       border: 1px solid rgba(59,130,246,0.2);
     }
+    .tag-orange { background: var(--orange-dim); color: var(--orange); border-color: rgba(249,115,22,0.2); }
+    .tag-green { background: var(--green-dim); color: var(--green); border-color: rgba(34,197,94,0.2); }
 
     .article-title {
       font-size: clamp(26px, 4vw, 38px);
-      font-weight: 800;
-      line-height: 1.2;
-      letter-spacing: -0.02em;
-      color: var(--text);
-      margin-bottom: 14px;
+      font-weight: 800; line-height: 1.2; letter-spacing: -0.02em;
+      color: var(--text); margin-bottom: 14px;
     }
-
     .article-subtitle {
-      font-size: 17px;
-      color: var(--text-muted);
-      font-weight: 400;
-      line-height: 1.6;
-      margin-bottom: 28px;
-      max-width: 600px;
+      font-size: 17px; color: var(--text-muted); font-weight: 400;
+      line-height: 1.6; margin-bottom: 28px; max-width: 600px;
     }
-
     .article-meta {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
       padding: 16px 0;
       border-top: 1px solid var(--border);
       border-bottom: 1px solid var(--border);
       margin-bottom: 48px;
     }
-
     .meta-avatar {
-      width: 36px; height: 36px;
-      border-radius: 50%;
+      width: 36px; height: 36px; border-radius: 50%;
       background: linear-gradient(135deg, var(--accent), var(--accent-2));
       display: flex; align-items: center; justify-content: center;
-      font-size: 13px;
-      font-weight: 700;
-      color: #fff;
-      flex-shrink: 0;
+      font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
     }
-
     .meta-info { flex: 1; }
     .meta-author { font-size: 13px; font-weight: 600; color: var(--text); }
     .meta-details { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
-
     .meta-reading {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--text-muted);
-      background: var(--bg-3);
-      padding: 6px 12px;
-      border-radius: 100px;
-      border: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--text-muted);
+      background: var(--bg-3); padding: 6px 12px;
+      border-radius: 100px; border: 1px solid var(--border);
     }
     .meta-reading svg { width: 13px; height: 13px; color: var(--accent); }
 
-    /* ─── Prose ─── */
+    /* Prose */
     .prose h2 {
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      color: var(--text);
-      margin-top: 56px;
-      margin-bottom: 16px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--border);
+      font-size: 22px; font-weight: 700; letter-spacing: -0.01em;
+      color: var(--text); margin-top: 56px; margin-bottom: 16px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
       scroll-margin-top: calc(var(--nav-h) + 24px);
     }
-
     .prose h3 {
-      font-size: 17px;
-      font-weight: 600;
-      color: var(--text);
-      margin-top: 36px;
-      margin-bottom: 12px;
+      font-size: 17px; font-weight: 600; color: var(--text);
+      margin-top: 36px; margin-bottom: 12px;
       scroll-margin-top: calc(var(--nav-h) + 24px);
     }
-
-    .prose p {
-      font-size: 16px;
-      color: var(--text);
-      margin-bottom: 20px;
-      line-height: 1.8;
-    }
-
+    .prose p { font-size: 16px; color: var(--text); margin-bottom: 20px; line-height: 1.8; }
     .prose strong { color: var(--text); font-weight: 600; }
-
+    .prose ul, .prose ol { margin: 0 0 20px 24px; }
+    .prose li { font-size: 16px; color: var(--text); line-height: 1.8; margin-bottom: 6px; }
     .prose a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(59,130,246,0.3); transition: border-color 0.2s; }
     .prose a:hover { border-bottom-color: var(--accent); }
 
-    /* ─── Incident banner ─── */
+    /* Incident banner */
     .incident-banner {
-      display: flex;
-      align-items: flex-start;
-      gap: 14px;
+      display: flex; align-items: flex-start; gap: 14px;
       background: var(--red-dim);
       border: 1px solid rgba(239,68,68,0.2);
       border-left: 3px solid var(--red);
       border-radius: var(--radius-sm);
-      padding: 16px 18px;
-      margin: 0 0 28px;
+      padding: 16px 18px; margin: 0 0 28px;
     }
     .incident-banner .banner-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
     .incident-banner .banner-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--red); margin-bottom: 4px; }
     .incident-banner .banner-body { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
 
-    /* ─── Code blocks ─── */
-    .code-block {
-      background: var(--bg-3);
-      border: 1px solid var(--border);
+    /* Phase banners */
+    .phase-banner {
+      display: flex; align-items: center; gap: 14px;
       border-radius: var(--radius-sm);
-      overflow: hidden;
-      margin: 24px 0;
-      font-size: 13.5px;
+      padding: 14px 18px; margin: 0 0 28px;
     }
+    .phase-banner.p1 { background: var(--red-dim); border: 1px solid rgba(239,68,68,0.2); border-left: 3px solid var(--red); }
+    .phase-banner.p2 { background: var(--orange-dim); border: 1px solid rgba(249,115,22,0.2); border-left: 3px solid var(--orange); }
+    .phase-banner.p3 { background: var(--green-dim); border: 1px solid rgba(34,197,94,0.2); border-left: 3px solid var(--green); }
+    .phase-banner .ph-num { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7; }
+    .phase-banner.p1 .ph-num { color: var(--red); }
+    .phase-banner.p2 .ph-num { color: var(--orange); }
+    .phase-banner.p3 .ph-num { color: var(--green); }
+    .phase-banner .ph-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .phase-banner .ph-date { font-size: 12px; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
 
+    /* Code blocks */
+    .code-block {
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden;
+      margin: 24px 0; font-size: 13.5px;
+    }
     .code-label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 14px;
-      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 14px; border-bottom: 1px solid var(--border);
       background: var(--bg-4);
     }
-
     .code-dot { width: 10px; height: 10px; border-radius: 50%; }
     .code-dot-r { background: #ef4444; }
     .code-dot-y { background: #f59e0b; }
     .code-dot-g { background: #22c55e; }
     .code-filename { font-size: 11px; color: var(--text-dim); margin-left: 4px; font-family: 'Fira Code', monospace; }
-
     .code-block pre[class*="language-"] {
-      margin: 0;
-      padding: 18px 20px;
+      margin: 0; padding: 18px 20px;
       background: transparent !important;
-      font-size: 13px;
-      line-height: 1.7;
-      overflow-x: auto;
-      tab-size: 2;
+      font-size: 13px; line-height: 1.7; overflow-x: auto; tab-size: 2;
     }
-
-    .code-block code[class*="language-"] {
-      font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
-    }
+    .code-block code[class*="language-"] { font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace; }
 
     /* Inline code */
     .prose code:not([class*="language-"]) {
       font-family: 'Fira Code', 'JetBrains Mono', monospace;
-      font-size: 13px;
-      background: var(--bg-3);
-      border: 1px solid var(--border);
-      padding: 1px 6px;
-      border-radius: 4px;
-      color: var(--accent-2);
+      font-size: 13px; background: var(--bg-3); border: 1px solid var(--border);
+      padding: 1px 6px; border-radius: 4px; color: var(--accent-2);
     }
 
-    /* ─── Mermaid diagrams ─── */
+    /* Mermaid diagrams */
     .diagram-wrapper {
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 24px 20px;
-      margin: 28px 0;
-      overflow-x: auto;
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px 20px;
+      margin: 28px 0; overflow-x: auto;
     }
+    .diagram-caption { text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 12px; font-style: italic; }
+    .diagram-wrapper .mermaid { display: flex; justify-content: center; }
 
-    .diagram-caption {
-      text-align: center;
-      font-size: 12px;
-      color: var(--text-dim);
-      margin-top: 12px;
-      font-style: italic;
-    }
-
-    .diagram-wrapper .mermaid {
-      display: flex;
-      justify-content: center;
-    }
-
-    /* ─── Tables ─── */
+    /* Tables */
     .table-wrapper {
-      overflow-x: auto;
-      margin: 24px 0;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border);
+      overflow-x: auto; margin: 24px 0;
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
     }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 14px;
-    }
-
-    thead tr {
-      background: var(--bg-3);
-    }
-
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    thead tr { background: var(--bg-3); }
     thead th {
-      padding: 11px 16px;
-      text-align: left;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--text-muted);
+      padding: 11px 16px; text-align: left;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--text-muted);
       border-bottom: 1px solid var(--border-strong);
     }
-
-    tbody tr {
-      border-bottom: 1px solid var(--border);
-      transition: background 0.15s;
-    }
-
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
     tbody tr:last-child { border-bottom: none; }
     tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
     [data-theme="light"] tbody tr:nth-child(even) { background: rgba(0,0,0,0.02); }
     tbody tr:hover { background: var(--accent-dim); }
-
-    tbody td {
-      padding: 11px 16px;
-      color: var(--text-muted);
-      vertical-align: top;
-      line-height: 1.5;
-    }
-
+    tbody td { padding: 11px 16px; color: var(--text-muted); vertical-align: top; line-height: 1.5; }
     tbody td:first-child { color: var(--text); font-weight: 500; }
 
-    .result-table tbody td:last-child {
-      color: var(--green);
-      font-weight: 600;
-    }
+    /* Result table — 3-phase evolution */
+    .evolution-table thead th:nth-child(2) { color: var(--red); }
+    .evolution-table thead th:nth-child(3) { color: var(--orange); }
+    .evolution-table thead th:nth-child(4) { color: var(--green); }
+    .evolution-table td.val-bad { color: var(--red) !important; font-weight: 500; }
+    .evolution-table td.val-mid { color: var(--orange) !important; font-weight: 500; }
+    .evolution-table td.val-good { color: var(--green) !important; font-weight: 600; }
 
-    .result-table tbody td:nth-child(2) { color: var(--red); }
+    /* Simple result table */
+    .result-table tbody td:nth-child(2) { color: var(--red); font-weight: 500; }
+    .result-table tbody td:last-child { color: var(--green); font-weight: 600; }
 
-    /* ─── Takeaway cards ─── */
-    .takeaways-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      margin: 28px 0;
-    }
+    /* Root cause table */
+    .rc-table tbody td:nth-child(3) { color: var(--red); font-size: 13px; }
 
+    /* Takeaway cards */
+    .takeaways-grid { display: flex; flex-direction: column; gap: 14px; margin: 28px 0; }
     .takeaway-card {
-      display: flex;
-      gap: 16px;
-      align-items: flex-start;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
+      display: flex; gap: 16px; align-items: flex-start;
+      background: var(--bg-2); border: 1px solid var(--border);
       border-left: 3px solid var(--accent);
-      border-radius: var(--radius-sm);
-      padding: 16px 18px;
+      border-radius: var(--radius-sm); padding: 16px 18px;
       transition: border-color 0.2s, background 0.2s;
     }
-
-    .takeaway-card:hover {
-      background: var(--bg-3);
-      border-left-color: var(--accent-2);
-    }
-
+    .takeaway-card:hover { background: var(--bg-3); border-left-color: var(--accent-2); }
     .takeaway-num {
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      color: var(--accent);
-      background: var(--accent-dim);
+      font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+      color: var(--accent); background: var(--accent-dim);
       border: 1px solid rgba(59,130,246,0.2);
-      min-width: 28px;
-      height: 28px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      min-width: 28px; height: 28px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 1px;
+    }
+    .takeaway-content strong { display: block; font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
+    .takeaway-content p { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; margin: 0; }
+
+    /* Timeline */
+    .timeline { position: relative; margin: 32px 0; padding-left: 28px; }
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 7px; top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--red), var(--orange), var(--green));
+      border-radius: 2px;
+    }
+    .tl-item { position: relative; margin-bottom: 24px; }
+    .tl-item:last-child { margin-bottom: 0; }
+    .tl-dot {
+      position: absolute;
+      left: -24px; top: 4px;
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid var(--bg);
       flex-shrink: 0;
-      margin-top: 1px;
     }
+    .tl-dot.phase-1 { background: var(--red); box-shadow: 0 0 0 3px rgba(239,68,68,0.2); }
+    .tl-dot.phase-2 { background: var(--orange); box-shadow: 0 0 0 3px rgba(249,115,22,0.2); }
+    .tl-dot.phase-3 { background: var(--green); box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
+    .tl-dot.neutral { background: var(--text-dim); box-shadow: 0 0 0 3px rgba(100,100,100,0.15); }
+    .tl-date { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 3px; }
+    .tl-event { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+    .tl-impact { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
 
-    .takeaway-content strong {
-      display: block;
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 5px;
-    }
+    /* Divider */
+    .prose hr { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
 
-    .takeaway-content p {
-      font-size: 13.5px;
-      color: var(--text-muted);
-      line-height: 1.6;
-      margin: 0;
-    }
-
-    /* ─── Divider ─── */
-    .prose hr {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 48px 0;
-    }
-
-    /* ─── Footer ─── */
-    .article-footer {
-      margin-top: 64px;
-      padding-top: 32px;
-      border-top: 1px solid var(--border);
-    }
-
+    /* Footer */
+    .article-footer { margin-top: 64px; padding-top: 32px; border-top: 1px solid var(--border); }
     .author-card {
-      display: flex;
-      gap: 18px;
-      align-items: flex-start;
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 22px;
-      margin-bottom: 32px;
+      display: flex; gap: 18px; align-items: flex-start;
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px 22px; margin-bottom: 32px;
     }
-
     .author-avatar {
-      width: 52px; height: 52px;
-      border-radius: 50%;
+      width: 52px; height: 52px; border-radius: 50%;
       background: linear-gradient(135deg, var(--accent), var(--accent-2));
       display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-      font-weight: 800;
-      color: #fff;
-      flex-shrink: 0;
+      font-size: 18px; font-weight: 800; color: #fff; flex-shrink: 0;
     }
-
     .author-name { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
     .author-role { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
     .author-bio { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
     .author-link { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(59,130,246,0.3); transition: border-color 0.2s; }
     .author-link:hover { border-bottom-color: var(--accent); }
-
     .footer-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px; }
-
     .footer-tag {
-      font-size: 12px;
-      font-weight: 500;
-      padding: 4px 12px;
-      border-radius: 100px;
-      border: 1px solid var(--border-strong);
-      color: var(--text-muted);
-      text-decoration: none;
+      font-size: 12px; font-weight: 500; padding: 4px 12px;
+      border-radius: 100px; border: 1px solid var(--border-strong);
+      color: var(--text-muted); text-decoration: none;
       transition: background 0.15s, color 0.15s, border-color 0.15s;
     }
     .footer-tag:hover { background: var(--accent-dim); color: var(--accent); border-color: rgba(59,130,246,0.3); }
-
-    .share-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 32px;
-    }
-
+    .share-row { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
     .share-label { font-size: 12px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
-
     .share-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 7px 14px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--bg-3);
-      color: var(--text-muted);
-      font-size: 12px;
-      font-weight: 500;
-      font-family: 'Inter', sans-serif;
-      cursor: pointer;
-      text-decoration: none;
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 14px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--bg-3);
+      color: var(--text-muted); font-size: 12px; font-weight: 500;
+      font-family: 'Inter', sans-serif; cursor: pointer; text-decoration: none;
       transition: background 0.15s, color 0.15s, border-color 0.15s;
     }
     .share-btn:hover { background: var(--bg-4); color: var(--text); border-color: var(--border-strong); }
     .share-btn svg { width: 14px; height: 14px; }
 
-    .nav-articles {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    .nav-article-card {
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 16px;
-      transition: border-color 0.2s, background 0.2s;
-      text-decoration: none;
-    }
-    .nav-article-card:hover { background: var(--bg-3); border-color: var(--border-strong); }
-    .nav-article-dir { font-size: 11px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
-    .nav-article-title { font-size: 13px; color: var(--text-muted); line-height: 1.4; }
-    .nav-article-card.next { text-align: right; }
-
-    /* ─── Responsive ─── */
+    /* Responsive */
     @media (max-width: 900px) {
       .toc-sidebar { display: none; }
       .toc-mobile-toggle { display: flex; }
-      .article-main { max-width: 100%; padding-top: 24px; }
-      .page-wrapper { padding: 0 16px; gap: 0; }
+      .page-wrapper { gap: 0; padding-left: 16px; padding-right: 16px; }
     }
-
     @media (max-width: 600px) {
       .article-title { font-size: 24px; }
-      .nav-articles { grid-template-columns: 1fr; }
-      .meta-reading { display: none; }
+      .article-meta { gap: 10px; }
     }
   </style>
 </head>
 <body>
-
-  <!-- Navigation -->
   <nav>
     <a href="../index.html" class="nav-back">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 3L5 8l5 5"/></svg>
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
       Portfolio
     </a>
     <div class="nav-sep"></div>
-    <span class="nav-title">How I Fixed a 100M+ Message Pipeline Bottleneck</span>
+    <span class="nav-title">From 100M Stuck Messages to Zero OOM</span>
     <div class="nav-actions">
-      <button class="theme-btn" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">
-        <svg id="iconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
-        <svg id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <button class="theme-btn" id="themeToggle" aria-label="Toggle theme">
+        <svg id="sunIcon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path stroke-linecap="round" d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <svg id="moonIcon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="display:none"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
       </button>
     </div>
   </nav>
 
   <div class="page-wrapper">
-
-    <!-- Desktop TOC -->
-    <aside class="toc-sidebar" aria-label="Table of contents">
-      <div class="toc-label">Contents</div>
+    <!-- TOC Sidebar -->
+    <aside class="toc-sidebar">
+      <div class="toc-label">On this page</div>
       <ul class="toc-list" id="tocList">
         <li><a href="#intro">Introduction</a></li>
         <li><a href="#architecture">The Architecture</a></li>
-        <li>
-          <a href="#incident1">Incident 1: 100M+ Bottleneck</a>
-          <ul class="toc-sub toc-list">
-            <li><a href="#what-went-wrong">What Went Wrong</a></li>
-            <li><a href="#fix1">The Fix: Bounded Dispatcher</a></li>
-            <li><a href="#results1">Results</a></li>
-          </ul>
-        </li>
-        <li>
-          <a href="#incident2">Incident 2: Recurring OOM</a>
-          <ul class="toc-sub toc-list">
-            <li><a href="#oom-root-cause">Root Cause</a></li>
-            <li><a href="#fix2">The Fix</a></li>
-          </ul>
-        </li>
-        <li><a href="#takeaways">Key Takeaways</a></li>
+        <li><a href="#phase1">Phase 1 — 100M Meltdown</a></li>
+        <li class="toc-sub"><ul class="toc-list">
+          <li><a href="#p1-crisis">The Crisis</a></li>
+          <li><a href="#p1-root">Root Cause</a></li>
+          <li><a href="#p1-fix">The Fix</a></li>
+          <li><a href="#p1-results">Results</a></li>
+        </ul></li>
+        <li><a href="#phase2">Phase 2 — OOM That Wouldn't Die</a></li>
+        <li class="toc-sub"><ul class="toc-list">
+          <li><a href="#p2-leak">The Slow Bleed</a></li>
+          <li><a href="#p2-fix">The Fix</a></li>
+        </ul></li>
+        <li><a href="#phase3">Phase 3 — The Final Fix</a></li>
+        <li class="toc-sub"><ul class="toc-list">
+          <li><a href="#p3-profiling">Still Leaking</a></li>
+          <li><a href="#p3-rewrite">The Rewrite</a></li>
+          <li><a href="#p3-results">Final Results</a></li>
+        </ul></li>
+        <li><a href="#takeaways">7 Key Takeaways</a></li>
+        <li><a href="#timeline">War Timeline</a></li>
       </ul>
     </aside>
 
-    <!-- Main Content -->
-    <main class="article-main">
-
-      <!-- Mobile TOC -->
-      <button class="toc-mobile-toggle" id="tocMobileToggle" aria-expanded="false">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4h12M2 8h8M2 12h10"/></svg>
-        Table of Contents
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6l4 4 4-4"/></svg>
+    <!-- Mobile TOC -->
+    <div style="display:none" id="mobileTocWrapper">
+      <button class="toc-mobile-toggle" id="mobileTocBtn">
+        On this page
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
       </button>
-      <div class="toc-mobile-panel" id="tocMobilePanel">
-        <ul class="toc-list" style="padding: 0 8px;">
+      <div class="toc-mobile-panel" id="mobileTocPanel">
+        <ul class="toc-list">
           <li><a href="#intro">Introduction</a></li>
           <li><a href="#architecture">The Architecture</a></li>
-          <li><a href="#incident1">Incident 1: 100M+ Bottleneck</a></li>
-          <li><a href="#what-went-wrong" style="padding-left:28px">What Went Wrong</a></li>
-          <li><a href="#fix1" style="padding-left:28px">The Fix: Bounded Dispatcher</a></li>
-          <li><a href="#results1" style="padding-left:28px">Results</a></li>
-          <li><a href="#incident2">Incident 2: Recurring OOM</a></li>
-          <li><a href="#oom-root-cause" style="padding-left:28px">Root Cause</a></li>
-          <li><a href="#fix2" style="padding-left:28px">The Fix</a></li>
-          <li><a href="#takeaways">Key Takeaways</a></li>
+          <li><a href="#phase1">Phase 1 — Aug 2025</a></li>
+          <li><a href="#phase2">Phase 2 — Oct–Dec 2025</a></li>
+          <li><a href="#phase3">Phase 3 — Mar 2026</a></li>
+          <li><a href="#takeaways">7 Key Takeaways</a></li>
+          <li><a href="#timeline">War Timeline</a></li>
         </ul>
       </div>
+    </div>
 
-      <!-- Article Header -->
+    <!-- Article -->
+    <main class="article-main">
       <div class="article-tags">
         <span class="tag">Go</span>
         <span class="tag">Kafka</span>
-        <span class="tag">Distributed Systems</span>
-        <span class="tag">Performance Engineering</span>
-        <span class="tag">Production Incidents</span>
+        <span class="tag tag-orange">Performance Engineering</span>
+        <span class="tag tag-orange">OOM</span>
+        <span class="tag tag-green">Distributed Systems</span>
+        <span class="tag tag-green">Production Incidents</span>
       </div>
 
-      <h1 class="article-title">How I Fixed a 100M+ Message Pipeline Bottleneck and Recurring OOM Crashes</h1>
-      <p class="article-subtitle">Lessons from debugging unbounded concurrency, memory leaks, and backpressure in a high-throughput Go event processor</p>
+      <h1 class="article-title">From 100M Stuck Messages to Zero OOM: A 7-Month War with a Go Event Pipeline</h1>
+      <p class="article-subtitle">Three phases of debugging unbounded concurrency, memory leaks, and backpressure — processing 100K+ events/hour for Shopify merchants</p>
 
       <div class="article-meta">
         <div class="meta-avatar">NN</div>
         <div class="meta-info">
           <div class="meta-author">Nghia Nguyen</div>
-          <div class="meta-details">Senior Software Engineer II &nbsp;·&nbsp; TrueProfit &nbsp;·&nbsp; April 2026</div>
+          <div class="meta-details">Senior Software Engineer II · TrueProfit</div>
         </div>
         <div class="meta-reading">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          ~12 min read
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2"/></svg>
+          15 min read · April 2026
         </div>
       </div>
 
-      <!-- Article Body -->
       <article class="prose">
 
-        <section id="intro">
-          <p>
-            At TrueProfit, we process real-time e-commerce analytics for Shopify merchants — tracking ads, revenue, and attribution across hundreds of thousands of events per second. At the heart of this is <strong>TruePixel</strong>, our event processing pipeline.
-          </p>
-          <p>
-            Over the past year, I tackled two critical production incidents that were causing hundreds of millions of messages to back up in Kafka and recurring OOM kills on our event processor pods. This post covers the root causes, the fixes, and the hard lessons learned.
-          </p>
-        </section>
-
-        <section id="architecture">
-          <h2>The Architecture</h2>
-          <p>
-            The Event Processor consumes from Kafka, processes each event through 5 stages, and writes to Elasticsearch, MongoDB, and Redis. Simple enough — until it isn't.
-          </p>
-
-          <div class="diagram-wrapper">
-            <div class="mermaid" id="diag-arch">
-graph LR
-    EC["🌐 Event Collector<br/>(Shopify webhooks, pixel tracking)"]
-    K["📨 Kafka<br/>(3+ partitions)"]
-    EP["⚙️ Event Processor<br/>(Go service)"]
-    ES["🔍 Elasticsearch<br/>(events, attribution)"]
-    MG["🍃 MongoDB<br/>(customers, ad leads)"]
-    RD["⚡ Redis<br/>(product stats buffer)"]
-
-    EC -->|HTTPS| K
-    K -->|"Sarama ConsumerGroup"| EP
-    EP -->|"index, attribution"| ES
-    EP -->|"customer, ad_lead"| MG
-    EP -->|"product stats"| RD
-    RD -->|"batch flush"| ES
-            </div>
-            <p class="diagram-caption">Figure 1 — TruePixel high-level data flow</p>
-          </div>
-        </section>
+        <h2 id="intro">Introduction</h2>
+        <p>At TrueProfit, our TruePixel service processes real-time e-commerce events for Shopify merchants — ad tracking, attribution, visitor analytics, product stats. At peak, we handle <strong>100K+ data points per hour</strong> across hundreds of thousands of unique users.</p>
+        <p>Over 7 months — August 2025 to March 2026 — I fought three distinct battles with this pipeline. Each fix revealed the next problem. Phase 1 cleared a 100-million-message backlog. Phase 2 slowed but didn't stop an OOM cycle. Phase 3 eliminated it entirely. This is the full story.</p>
 
         <hr />
 
-        <section id="incident1">
-          <h2>Incident 1: The 100M+ Message Bottleneck</h2>
+        <h2 id="architecture">The Architecture</h2>
+        <p>The Event Processor sits at the center: it consumes from Kafka, routes each event through 5 stages (index → ad_lead → attribution → customer → product_stats), and writes to Elasticsearch, MongoDB, and Redis. 30 pods in production.</p>
 
-          <div class="incident-banner">
-            <div class="banner-icon">🚨</div>
-            <div>
-              <div class="banner-title">Production Impact</div>
-              <div class="banner-body">Kafka consumer lag growing unbounded. Hundreds of millions of messages stuck. Pods restarting under load.</div>
-            </div>
+        <div class="diagram-wrapper">
+          <div class="mermaid">
+graph LR
+    EC["🌐 Event Collector<br/>(Shopify webhooks, pixel)"]
+    K["📨 Kafka<br/>(3+ partitions, millions msgs)"]
+    EP["⚙️ Event Processor<br/>(Go, 30 pods)"]
+    ES["🔍 Elasticsearch<br/>(events, attribution)"]
+    MG["🍃 MongoDB<br/>(customers, ad leads)"]
+    RD["⚡ Redis<br/>(product stats, cache)"]
+
+    EC -->|HTTPS| K
+    K -->|Sarama| EP
+    EP -->|index, attribution| ES
+    EP -->|customer, ad_lead| MG
+    EP -->|product stats| RD
+    RD -->|batch flush| ES
           </div>
+          <div class="diagram-caption">TruePixel Event Processor — simplified data flow</div>
+        </div>
 
-          <h3 id="what-went-wrong">What Went Wrong</h3>
-          <p>
-            The original <code>OrderedEventProcessor</code> (1,291 lines, now deleted) had a critical design flaw: <strong>unbounded per-user goroutines</strong>.
-          </p>
+        <p>Simple enough in theory. The pain came from scale: sustained high throughput, 50K+ unique <code>shopID:clientID</code> keys in flight, and incremental features shipped without considering memory budgets.</p>
 
-          <div class="code-block">
-            <div class="code-label">
-              <div class="code-dot code-dot-r"></div>
-              <div class="code-dot code-dot-y"></div>
-              <div class="code-dot code-dot-g"></div>
-              <span class="code-filename">ordered_event_processor.go (BROKEN)</span>
-            </div>
-            <pre class="language-go"><code class="language-go">// BROKEN: Creates a new goroutine for EVERY unique user
-// sync.Map grows without limit
-type OrderedEventProcessor struct {
-    userQueues sync.Map  // key: "shopID:clientID" → goroutine
-    // No limit on how many goroutines can exist
+        <hr />
+
+        <h2 id="phase1">Phase 1: The 100M Message Meltdown</h2>
+
+        <div class="phase-banner p1">
+          <div>
+            <div class="ph-num">Phase 1</div>
+            <div class="ph-title">100M messages stuck. Pipeline blocked. 3-day war room.</div>
+          </div>
+          <div class="ph-date">August 25–28, 2025</div>
+        </div>
+
+        <h3 id="p1-crisis">The Crisis</h3>
+        <p>Monday morning. The Kafka consumer lag dashboard turns red. <strong>100 million+ messages</strong> are queued and growing. Every 7 days, the backlog accumulates to 100M+, pods restart under memory pressure, and the cycle repeats. I spent 3 days in a war room fixing this.</p>
+
+        <h3 id="p1-root">Root Cause: Unbounded Worker Concurrency</h3>
+        <p>The event processor was configured with <strong>150 concurrent workers</strong> and unlimited per-user goroutines:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">processor/config.go — BEFORE (Aug 25, 2025)</span>
+          </div>
+          <pre><code class="language-go">// Production config — this will hurt you
+workerPool: pond.NewPool(150, pond.WithQueueSize(300))
+// No limit on concurrent users
+// Cleanup: every 5 minutes (too slow)
+// Result: 150 workers × goroutines-per-event × 50K+ users = CPU overload</code></pre>
+        </div>
+
+        <p>150 workers times multiple goroutines per event times 50K+ unique users: the Go scheduler couldn't cope. GC pauses cascaded. Kafka consumer lag grew exponentially.</p>
+        <p>Worse: there was a <strong>race condition</strong> in event ordering. Events for the same user were processed out of order, corrupting attribution data.</p>
+
+        <h3 id="p1-fix">The Fix: 48 Hours, 12 Hotfix Commits</h3>
+
+        <p><strong>August 27:</strong> Fix the race condition first — route events through per-user queues keyed by <code>shopID:clientID</code>. Each user's events are now processed sequentially.</p>
+        <p><strong>August 28, 09:51:</strong> Emergency CPU reduction — slash the worker pool:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">processor/config.go — commit fe00ed0</span>
+          </div>
+          <pre><code class="language-go">// AFTER: Bounded and explicit
+workerPool: pond.NewPool(50, pond.WithQueueSize(100))  // 150 → 50
+maxUsers:   300                                         // was unlimited
+cleanupTicker: 30 * time.Second                        // was 5 minutes</code></pre>
+        </div>
+
+        <p><strong>August 28, 13:06:</strong> Final hardening — a bounded semaphore on the Kafka message handler itself:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">processor/consume.go — commit 75fd4c4</span>
+          </div>
+          <pre><code class="language-go">// Bounded concurrency: at most 10 messages in flight
+workerCount := 10
+sem := make(chan struct{}, workerCount)
+
+for msg := range partition.Messages() {
+    sem <- struct{}{}  // Block if 10 in-flight — natural backpressure
+    go func(m *sarama.ConsumerMessage) {
+        defer func() { <-sem }()
+        processEvent(m)
+    }(msg)
 }</code></pre>
+        </div>
+
+        <h3 id="p1-results">Results</h3>
+
+        <div class="table-wrapper">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Before</th>
+                <th>After</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Workers</td><td>150 (unbounded)</td><td>50 (bounded)</td></tr>
+              <tr><td>Max concurrent users</td><td>Unlimited</td><td>300</td></tr>
+              <tr><td>CPU utilization</td><td>Overloaded (100%)</td><td>Stable (60–70%)</td></tr>
+              <tr><td>Kafka lag</td><td>100M+ (growing)</td><td>Cleared within hours</td></tr>
+              <tr><td>Event ordering</td><td>Race condition</td><td>FIFO per user</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>The backlog cleared. Pipeline stabilized. I thought the war was over. <strong>It wasn't.</strong></p>
+
+        <hr />
+
+        <h2 id="phase2">Phase 2: The OOM That Wouldn't Die</h2>
+
+        <div class="phase-banner p2">
+          <div>
+            <div class="ph-num">Phase 2</div>
+            <div class="ph-title">New feature ships. OOM kills begin. 30 pods on a sawtooth death cycle.</div>
           </div>
+          <div class="ph-date">October – December 2025</div>
+        </div>
 
-          <p>
-            For every unique <code>shopID:clientID</code> pair, a new goroutine was spawned with its own processing queue. With 50,000+ unique users hitting the system, that's 50,000+ goroutines — each holding memory, each competing for CPU.
-          </p>
+        <h3>New Feature, New Problem</h3>
+        <p>With the pipeline stable, a team member (Dat) shipped a new feature: <strong>visitor tracking</strong>. Track unique visitors per week per shop — straightforward business requirement. The implementation added three storage layers per event:</p>
+        <ol>
+          <li><strong>Ristretto in-memory cache</strong> — check if visitor seen recently</li>
+          <li><strong>Elasticsearch</strong> — check weekly visitor index</li>
+          <li><strong>MongoDB</strong> — increment weekly unique visitor counter</li>
+        </ol>
+        <p>Sounds reasonable. Except the cache was configured like this:</p>
 
-          <div class="diagram-wrapper">
-            <div class="mermaid" id="diag-before-after">
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">visitor/cache.go — commit aaa55a5 (Oct 24, 2025)</span>
+          </div>
+          <pre><code class="language-go">// 1 GB cache budget in a pod with 512 MiB memory limit.
+cache, _ := ristretto.NewCache(&ristretto.Config[string, string]{
+    NumCounters: 1e7,      // 10 MILLION key slots
+    MaxCost:     1 << 30,  // 1 GB memory budget  ← the bomb
+    BufferItems: 64,
+})</code></pre>
+        </div>
+
+        <p><strong>1 GB cache budget in a pod with a 512 MiB memory limit.</strong> The math was always going to end one way.</p>
+
+        <h3 id="p2-leak">The Slow Bleed</h3>
+        <p>The OOM didn't happen immediately. Memory crept up over 3 days, then the pod was killed and the cycle restarted:</p>
+
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>Time</th><th>Memory</th><th>Event</th></tr></thead>
+            <tbody>
+              <tr><td>Day 0</td><td>32 MiB</td><td>Pod starts fresh</td></tr>
+              <tr><td>Day 1</td><td>~200 MiB</td><td>Cache filling with visitor keys</td></tr>
+              <tr><td>Day 2</td><td>~350 MiB</td><td>Approaching limit</td></tr>
+              <tr><td>Day 3</td><td>480–512 MiB</td><td><strong>OOM kill → restart → repeat</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>30 pods, all on the same death cycle. Grafana showed a perfect sawtooth pattern — memory climbs linearly, hits 512 MiB, drops to zero, climbs again. Two pod families (<code>595d8d6476-*</code> and <code>78cdb9f9dd-*</code>) showed the same slope even after a deploy, confirming this was a code-level leak, not infrastructure.</p>
+
+        <p>The visitor tracking code also had compounding issues:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">visitor/handler.go — original (problematic)</span>
+          </div>
+          <pre><code class="language-go">// One timeout wrapping everything — if ES is slow, MongoDB waits too
+ctx, cancel := context.WithTimeout(baseCtx, 60*time.Second)
+defer cancel()
+
+checkCache(ctx)          // sub-millisecond, but context held for 60s
+queryES(ctx)             // could wait up to 60s — holds ctx open
+writeMongoDB(ctx)        // could wait up to 60s — holds ctx open
+
+// Info-level logs in the hot path
+// 1,000+ visitors/sec = 1,000+ log allocations/sec
+logger.Info("visitor cache hit", "shopID", shopID)</code></pre>
+        </div>
+
+        <h3 id="p2-fix">The Fix (December 4, 2025)</h3>
+        <p>Hung (with my review) landed the OOM triage in commit <code>0aae4ed</code>:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">visitor/cache.go — commit 0aae4ed (Dec 4, 2025)</span>
+          </div>
+          <pre><code class="language-go">// FIX 1: Halve the cache budget (stops the immediate bleeding)
+cache, _ := ristretto.NewCache(&ristretto.Config[string, string]{
+    NumCounters: 5e6,       // 5M (was 10M)
+    MaxCost:     500 << 20, // 500 MB (was 1 GB)
+})
+
+// FIX 2: Auto-calculate cost — prevents over-admission
+cache.Set(key, "exists", -1)  // -1 = auto-calculate, not manual "1"
+
+// FIX 3: Per-operation timeouts — no more shared deadline
+esCtx, esCancel := context.WithTimeout(baseCtx, 30*time.Second)
+existsInES, _ := repo.VisitorExistsInES(esCtx, shopID, clientID)
+esCancel()  // Release ES context immediately after use
+
+mongoCtx, mongoCancel := context.WithTimeout(baseCtx, 15*time.Second)
+repo.IncrementWeeklyVisitors(mongoCtx, shopID, clientID)
+mongoCancel()
+
+// FIX 4: Debug logs — no allocations on production hot path
+logger.Debug("visitor cache hit", "shopID", shopID)  // was Info</code></pre>
+        </div>
+
+        <p>December 12: Hung migrated visitor checks from MongoDB to Redis — eliminating the 190ms MongoDB upsert per event. January 6, 2026: I removed the MongoDB dependency from the product stats path entirely (<code>b5935ba</code>).</p>
+        <p>OOM frequency dropped. But the sawtooth pattern persisted at a slower rate. The real root cause was still lurking.</p>
+
+        <hr />
+
+        <h2 id="phase3">Phase 3: The Final Fix</h2>
+
+        <div class="phase-banner p3">
+          <div>
+            <div class="ph-num">Phase 3</div>
+            <div class="ph-title">1 week profiling. 6 root causes. Nuclear rewrite. Zero OOM.</div>
+          </div>
+          <div class="ph-date">March 2026</div>
+        </div>
+
+        <h3 id="p3-profiling">Still Leaking</h3>
+        <p>Even after the Phase 2 fixes, Grafana showed the same sawtooth: 32 MiB → slow climb → 480 MiB → OOM kill. Just took longer. I spent a week profiling with pprof. The architecture comparison tells the story:</p>
+
+        <div class="diagram-wrapper">
+          <div class="mermaid">
 graph TB
-    subgraph before["❌ BEFORE: Unbounded Goroutines"]
-        K1["Kafka"]
-        OP["OrderedEventProcessor<br/>1 goroutine per user<br/>50,000+ goroutines"]
-        M1["Memory: grows → OOM"]
-        K1 -->|"unbounded"| OP
-        OP -->|"goroutine leak"| M1
+    subgraph before["❌ OrderedEventProcessor (1,291 lines)"]
+        K1["Kafka Consumer<br/>(Watermill)"]
+        SM["sync.Map<br/>1 goroutine per user<br/>50,000+ goroutines"]
+        PS["Product Stats Flush<br/>Load ALL keys → memory<br/>480 MiB spike"]
+        LUA["SCRIPT LOAD<br/>500 calls/sec"]
+        K1 --> SM
+        SM --> PS
+        PS --> LUA
     end
 
-    subgraph after["✅ AFTER: Bounded Keyed Dispatcher"]
-        K2["Kafka"]
-        D["userDispatcher<br/>8 workers per partition<br/>~128 goroutines total"]
-        M2["Memory: stable < 200 MiB"]
-        K2 -->|"backpressure"| D
-        D -->|"bounded"| M2
+    subgraph after["✅ Bounded Keyed Dispatcher (309 lines)"]
+        K2["Kafka Consumer<br/>(Sarama direct)"]
+        UD["userDispatcher<br/>8 workers per partition<br/>~128 goroutines"]
+        BF["Batch Flush<br/>100 keys at a time<br/>~10 MiB"]
+        SHA["EVALSHA<br/>0 SCRIPT LOAD"]
+        K2 --> UD
+        UD --> BF
+        BF --> SHA
     end
-            </div>
-            <p class="diagram-caption">Figure 2 — Before vs. after: unbounded goroutines vs. bounded worker pool</p>
           </div>
+          <div class="diagram-caption">Before vs After: architecture comparison. 1,291 LOC → 309 LOC, 50K goroutines → 128.</div>
+        </div>
 
-          <p>But goroutines were just the tip. Here's the full list of issues:</p>
+        <p>Six root causes I finally identified through profiling:</p>
 
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Issue</th>
-                  <th>Impact</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>1</td>
-                  <td>Unbounded per-user goroutines (<code>sync.Map</code>)</td>
-                  <td>50K+ goroutines → OOM after hours</td>
-                </tr>
-                <tr>
-                  <td>2</td>
-                  <td>Customer/product_stats stages blocked Kafka ack path</td>
-                  <td>Attribution latency ~250ms</td>
-                </tr>
-                <tr>
-                  <td>3</td>
-                  <td>Attribution reads stale ad data (race condition)</td>
-                  <td>1–5% accuracy loss on FB assist</td>
-                </tr>
-                <tr>
-                  <td>4</td>
-                  <td>ALL Redis keys loaded into memory before ES bulk write</td>
-                  <td>Peak memory 480–512 MiB per flush</td>
-                </tr>
-                <tr>
-                  <td>5</td>
-                  <td><code>SCRIPT LOAD</code> per key per flush (no SHA caching)</td>
-                  <td>500 Redis round-trips/sec</td>
-                </tr>
-                <tr>
-                  <td>6</td>
-                  <td>Watermill framework overhead</td>
-                  <td>15% CPU to framework alone</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <div class="table-wrapper">
+          <table class="rc-table">
+            <thead>
+              <tr><th>#</th><th>Root Cause</th><th>Impact</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>1</td><td>Duplicate events still spawned goroutines</td><td>Wasted memory per duplicate</td></tr>
+              <tr><td>2</td><td>Customer stage (~190ms) blocked Kafka ack path</td><td>Attribution latency ~250ms</td></tr>
+              <tr><td>3</td><td>Attribution read stale ad data (ad stage async)</td><td>1–5% accuracy loss</td></tr>
+              <tr><td>4</td><td><code>sync.Map</code>: unbounded per-user goroutines</td><td>50K+ goroutines at peak</td></tr>
+              <tr><td>5</td><td>ALL Redis keys loaded into memory before ES bulk write</td><td>Peak 480–512 MiB</td></tr>
+              <tr><td>6</td><td><code>SCRIPT LOAD</code> per key per flush</td><td>500 Redis roundtrips/sec</td></tr>
+            </tbody>
+          </table>
+        </div>
 
-          <h3 id="fix1">The Fix: Bounded Keyed Dispatcher</h3>
-          <p>
-            I replaced the entire <code>OrderedEventProcessor</code> with a bounded <code>userDispatcher</code> — the key innovation that solved everything.
-          </p>
+        <h3 id="p3-rewrite">The Nuclear Option: Rewrite</h3>
+        <p>I deleted the entire <code>OrderedEventProcessor</code> (1,291 lines) and <code>kafka_clean.go</code> (294 lines) and replaced them with a <strong>bounded keyed dispatcher</strong>. The new processing pipeline:</p>
 
-          <div class="diagram-wrapper">
-            <div class="mermaid" id="diag-pipeline">
+        <div class="diagram-wrapper">
+          <div class="mermaid">
 graph LR
     KM["Kafka Message<br/>key: shopID:clientID"]
 
@@ -939,309 +886,331 @@ graph LR
         BP --> W
     end
 
-    subgraph stages["Processing Stages"]
+    subgraph stages["Event Processing Stages"]
         direction TB
-        S1["1️⃣ Index Event<br/>SYNC · dedup"]
-        S2["2️⃣ Ad Lead<br/>ASYNC"]
-        S3["3️⃣ Attribution<br/>ASYNC (waits for ad)"]
-        S4["4️⃣ Customer<br/>FIRE &amp; FORGET"]
-        S5["5️⃣ Product Stats<br/>FIRE &amp; FORGET"]
+        S1["1️⃣ Index Event · SYNC<br/>Dedup: early return if seen"]
+        S2["2️⃣ Ad Lead · ASYNC<br/>Must complete before attribution"]
+        S3["3️⃣ Attribution · ASYNC<br/>Reads ad data from payload"]
+        S4["4️⃣ Customer · FIRE &amp; FORGET<br/>Bounded async pool"]
+        S5["5️⃣ Product Stats · FIRE &amp; FORGET<br/>Redis buffer → batch ES flush"]
         S1 --> S2 --> S3
         S3 --> S4
         S3 --> S5
     end
 
     KM --> dispatcher --> stages
-            </div>
-            <p class="diagram-caption">Figure 3 — New bounded keyed dispatcher with explicit stage ordering</p>
           </div>
+          <div class="diagram-caption">New pipeline: bounded workers, explicit stage sequencing, dedup at entry</div>
+        </div>
 
-          <p>
-            The dispatcher routes messages by user key to a bounded worker pool. When the queue is full (512 messages or 32 MiB), it <strong>blocks the Kafka consumer loop</strong> — proper backpressure instead of infinite buffering.
-          </p>
+        <p>The key innovation — the <code>userDispatcher</code> with dual-budget backpressure:</p>
 
-          <div class="code-block">
-            <div class="code-label">
-              <div class="code-dot code-dot-r"></div>
-              <div class="code-dot code-dot-y"></div>
-              <div class="code-dot code-dot-g"></div>
-              <span class="code-filename">user_dispatcher.go</span>
-            </div>
-            <pre class="language-go"><code class="language-go">// The key insight: block Kafka when we can't keep up
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">processor/dispatcher.go — SHTP-6414 (Mar 2026)</span>
+          </div>
+          <pre><code class="language-go">// The dispatcher: bounded workers + backpressure + per-user ordering
+type userDispatcher struct {
+    queues          map[string][]*sarama.ConsumerMessage
+    pendingMessages int
+    pendingBytes    int64
+    readyKeys       chan string
+    budgetAvailable chan struct{}
+    mu              sync.Mutex
+}
+
 func (d *userDispatcher) dispatch(msg *sarama.ConsumerMessage) {
+    userKey := string(msg.Key)
     for {
         d.mu.Lock()
-        if d.pendingMessages >= d.maxPendingMessages ||
-           d.pendingBytes+msgSize > d.maxPendingBytes {
+        // BACKPRESSURE: Block the Kafka consume loop when budget exhausted.
+        // This tells Kafka "slow down" — backpressure, not buffering.
+        if d.pendingMessages >= 512 || d.pendingBytes > 32<<20 {
             d.mu.Unlock()
-            &lt;-d.budgetAvailable  // BLOCK until a worker drains
+            <-d.budgetAvailable  // Wait for a worker to drain
             continue
         }
         d.queues[userKey] = append(d.queues[userKey], msg)
         d.pendingMessages++
-        d.pendingBytes += msgSize
+        d.pendingBytes += int64(len(msg.Value))
+        // Only signal readyKeys if this user isn't already in-flight.
+        // Preserves per-user ordering without goroutine-per-user.
+        if len(d.queues[userKey]) == 1 {
+            d.readyKeys <- userKey
+        }
         d.mu.Unlock()
         break
     }
 }</code></pre>
+        </div>
+
+        <p>Product stats: batch flush instead of load-all:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">product_stats/flush.go</span>
           </div>
+          <pre><code class="language-go">// BEFORE: Load ALL 50K Redis keys at once → 480 MiB spike
+keys := getAllKeysFromRedis()  // 50,000 keys in one []string
+bulkWriteToES(ctx, keys)      // one enormous allocation
 
-          <p>For product stats, I switched from "load everything into memory" to batch processing:</p>
-
-          <div class="code-block">
-            <div class="code-label">
-              <div class="code-dot code-dot-r"></div>
-              <div class="code-dot code-dot-y"></div>
-              <div class="code-dot code-dot-g"></div>
-              <span class="code-filename">product_stats_flusher.go</span>
-            </div>
-            <pre class="language-go"><code class="language-go">// BEFORE: Load all 50K Redis keys at once → 480 MiB spike
-keys := getAllKeysFromRedis()  // 50,000 keys in memory
-
-// AFTER: Process in batches of 100 → ~10 MiB spike
-for batch := range scanKeysInBatches(100) {
-    bulkWriteToES(ctx, batch)
+// AFTER: Scan in batches of 100 → ~10 MiB peak
+for batch := range scanKeysInBatches(ctx, 100) {
+    bulkWriteToES(ctx, batch)  // process and release; GC can reclaim
 }</code></pre>
+        </div>
+
+        <p>Lua script SHA caching — eliminate 500 <code>SCRIPT LOAD</code> calls per second:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">redis/scripts.go</span>
           </div>
+          <pre><code class="language-go">// BEFORE: SCRIPT LOAD on every flush — 500 extra roundtrips/sec
+redis.Call("EVAL", luaScript, keys, args...)
 
-          <p>And pre-computed the Lua script SHA at startup instead of calling <code>SCRIPT LOAD</code> 500 times/sec:</p>
+// AFTER: Compute SHA once at startup, reuse forever
+var atomicGetDeleteSHA = func() string {
+    sha, err := rdb.ScriptLoad(ctx, redisScript).Result()
+    if err != nil {
+        panic(fmt.Errorf("failed to load redis script: %w", err))
+    }
+    return sha
+}()
 
-          <div class="code-block">
-            <div class="code-label">
-              <div class="code-dot code-dot-r"></div>
-              <div class="code-dot code-dot-y"></div>
-              <div class="code-dot code-dot-g"></div>
-              <span class="code-filename">redis_scripts.go</span>
-            </div>
-            <pre class="language-go"><code class="language-go">// BEFORE: 500 SCRIPT LOAD calls/second
-redis.Call("EVAL", luaScript, ...)
+redis.Call("EVALSHA", atomicGetDeleteSHA, keys, args...)  // 0 extra roundtrips</code></pre>
+        </div>
 
-// AFTER: Pre-compute SHA once at startup
-var sha = computeSHA(luaScript)
-redis.Call("EVALSHA", sha, ...)  // Zero extra round-trips</code></pre>
+        <p>The full Kafka claim scheduler flow — showing how backpressure propagates from dispatcher back to the consumer loop:</p>
+
+        <div class="diagram-wrapper">
+          <div class="mermaid">
+flowchart TD
+    C["ConsumeClaim goroutine<br/>(per partition)"] --> D["dispatch(msg)"]
+    D --> B{"Budget available?<br/>msgs &lt; 512 AND bytes &lt; 32 MiB"}
+    B -->|No| W["⏸ Block — wait for budgetAvailable<br/>(Kafka consumer pauses naturally)"]
+    W --> D
+    B -->|Yes| Q["Append to queues[userKey]"]
+    Q --> R{"Key already in-flight?"}
+    R -->|No| READY["Push userKey → readyKeys channel"]
+    R -->|Yes| HOLD["Stays queued<br/>(preserves ordering)"]
+    READY --> K["Worker picks up from readyKeys"]
+    K --> P["ProcessEvent<br/>(5 stages)"]
+    P --> M["Mark contiguous offsets<br/>for commit"]
+    M --> F["Release budget<br/>Reschedule key if queue not empty"]
+    HOLD -.->|"Worker finishes → reschedules key"| K
           </div>
+          <div class="diagram-caption">Kafka claim → dispatch → worker → commit. Backpressure propagates upward automatically.</div>
+        </div>
 
-          <h3 id="results1">Results</h3>
+        <h3 id="p3-results">The Final Results</h3>
 
-          <div class="table-wrapper">
-            <table class="result-table">
-              <thead>
-                <tr>
-                  <th>Metric</th>
-                  <th>Before</th>
-                  <th>After</th>
-                  <th>Change</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Goroutine count</td>
-                  <td>50,000+ (unbounded)</td>
-                  <td>~128 (bounded)</td>
-                  <td>99.7% ↓</td>
-                </tr>
-                <tr>
-                  <td>Memory peak (flush)</td>
-                  <td>480–512 MiB</td>
-                  <td>~10 MiB</td>
-                  <td>98% ↓</td>
-                </tr>
-                <tr>
-                  <td>Attribution latency</td>
-                  <td>~250ms</td>
-                  <td>&lt;100ms</td>
-                  <td>60% faster</td>
-                </tr>
-                <tr>
-                  <td>SCRIPT LOAD calls/sec</td>
-                  <td>~500</td>
-                  <td>0</td>
-                  <td>Eliminated</td>
-                </tr>
-                <tr>
-                  <td>OOM kills/week</td>
-                  <td>3–5</td>
-                  <td>0</td>
-                  <td>Eliminated</td>
-                </tr>
-                <tr>
-                  <td>Kafka lag</td>
-                  <td>Grows unbounded</td>
-                  <td>Stable &lt;5s</td>
-                  <td>Stable</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <div class="table-wrapper">
+          <table class="evolution-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Phase 1 (Aug '25)</th>
+                <th>Phase 2 (Dec '25)</th>
+                <th>Phase 3 (Mar '26)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Goroutines</td>
+                <td class="val-bad">50K+ (unbounded)</td>
+                <td class="val-bad">50K+ (same arch)</td>
+                <td class="val-good">~128 (bounded)</td>
+              </tr>
+              <tr>
+                <td>Peak memory</td>
+                <td class="val-bad">480–512 MiB</td>
+                <td class="val-bad">480–512 MiB</td>
+                <td class="val-good">&lt; 200 MiB</td>
+              </tr>
+              <tr>
+                <td>Memory trend</td>
+                <td class="val-bad">Sawtooth (OOM cycle)</td>
+                <td class="val-mid">Slower sawtooth</td>
+                <td class="val-good">Flat (stable)</td>
+              </tr>
+              <tr>
+                <td>OOM kills / week</td>
+                <td class="val-bad">3–5 per pod</td>
+                <td class="val-mid">1–2 per pod</td>
+                <td class="val-good">0</td>
+              </tr>
+              <tr>
+                <td>Attribution latency</td>
+                <td class="val-bad">~250ms</td>
+                <td class="val-bad">~250ms</td>
+                <td class="val-good">&lt; 100ms</td>
+              </tr>
+              <tr>
+                <td>Redis SCRIPT LOAD/sec</td>
+                <td class="val-bad">500</td>
+                <td class="val-bad">500</td>
+                <td class="val-good">0</td>
+              </tr>
+              <tr>
+                <td>Flush peak memory</td>
+                <td class="val-bad">480 MiB</td>
+                <td class="val-bad">480 MiB</td>
+                <td class="val-good">~10 MiB</td>
+              </tr>
+              <tr>
+                <td>Code complexity</td>
+                <td class="val-bad">1,291 LOC</td>
+                <td class="val-bad">1,291 LOC</td>
+                <td class="val-good">309 LOC</td>
+              </tr>
+              <tr>
+                <td>Throughput</td>
+                <td class="val-mid">10K msg/min</td>
+                <td class="val-mid">10K msg/min</td>
+                <td class="val-good">10K msg/min (maintained)</td>
+              </tr>
+              <tr>
+                <td>Framework overhead</td>
+                <td class="val-bad">15% CPU (Watermill)</td>
+                <td class="val-bad">15% CPU (Watermill)</td>
+                <td class="val-good">0% (Sarama direct)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <hr />
 
-        <section id="incident2">
-          <h2>Incident 2: The Recurring OOM Crashes</h2>
+        <h2 id="takeaways">What I Learned: 7 Key Takeaways</h2>
 
-          <div class="incident-banner">
-            <div class="banner-icon">💥</div>
-            <div>
-              <div class="banner-title">Production Impact</div>
-              <div class="banner-body">Even after fixing the bottleneck, OOM kills kept happening — but for a different reason. Peak memory 1.2–1.5 GB, pods killed 2–3x/week.</div>
+        <div class="takeaways-grid">
+          <div class="takeaway-card">
+            <div class="takeaway-num">1</div>
+            <div class="takeaway-content">
+              <strong>Unbounded concurrency is a time bomb</strong>
+              <p><code>sync.Map</code> + goroutine-per-user "looks safe" but creates a deterministic memory leak. It only manifests under sustained production load — never in staging. Always set explicit bounds with semaphores or bounded worker pools before shipping.</p>
             </div>
           </div>
-
-          <h3 id="oom-root-cause">Root Cause: Unbounded Cache + Context Timeout Leaks</h3>
-          <p>
-            The visitor tracking logic used a Ristretto in-memory cache configured with absurd limits:
-          </p>
-
-          <div class="code-block">
-            <div class="code-label">
-              <div class="code-dot code-dot-r"></div>
-              <div class="code-dot code-dot-y"></div>
-              <div class="code-dot code-dot-g"></div>
-              <span class="code-filename">visitor_cache.go (BROKEN)</span>
+          <div class="takeaway-card">
+            <div class="takeaway-num">2</div>
+            <div class="takeaway-content">
+              <strong>Backpressure beats buffering</strong>
+              <p>Without backpressure, Kafka keeps pushing into an overwhelmed consumer. The dispatcher's blocking <code>&lt;-d.budgetAvailable</code> is the critical valve — it tells Kafka "slow down" instead of buffering into OOM. If your consumer doesn't push back, something else absorbs the pressure.</p>
             </div>
-            <pre class="language-go"><code class="language-go">// BROKEN: 1 GB cache with 10M key slots
-cache, _ := ristretto.NewCache(&ristretto.Config{
-    NumCounters: 1e7,      // 10 million keys
-    MaxCost:     1 &lt;&lt; 30,  // 1 GB budget
-})</code></pre>
           </div>
-
-          <p>
-            Combined with a single 60-second timeout wrapping cache + Elasticsearch + MongoDB operations:
-          </p>
-
-          <div class="code-block">
-            <div class="code-label">
-              <div class="code-dot code-dot-r"></div>
-              <div class="code-dot code-dot-y"></div>
-              <div class="code-dot code-dot-g"></div>
-              <span class="code-filename">visitor_processor.go (BROKEN)</span>
+          <div class="takeaway-card">
+            <div class="takeaway-num">3</div>
+            <div class="takeaway-content">
+              <strong>Memory budgets need dual limits</strong>
+              <p>"Max 512 messages" isn't enough if one message is 1 MB. Always track both count AND byte size. Our dispatcher enforces both: 512 messages AND 32 MiB. One dimension alone will be gamed by the data distribution.</p>
             </div>
-            <pre class="language-go"><code class="language-go">// BROKEN: One timeout for everything
-ctx, cancel := context.WithTimeout(baseCtx, 60*time.Second)
-defer cancel()
-
-checkCache(ctx)            // &lt;1ms
-queryElasticsearch(ctx)    // could wait 60s
-writeMongoDB(ctx)          // could wait 60s</code></pre>
           </div>
-
-          <p>
-            If ES was slow, the entire chain waited. And Info-level logs in this hot path (1,000+ visitors/sec = 1,000+ log allocations/sec) added serious GC pressure.
-          </p>
-
-          <div class="diagram-wrapper">
-            <div class="mermaid" id="diag-timeout">
-graph TB
-    subgraph before["❌ BEFORE: Single 60s Timeout"]
-        T1["context.WithTimeout(60s)"]
-        C1["Cache Check<br/>&lt;1ms"]
-        E1["ES Query<br/>could wait 60s"]
-        M1["MongoDB Write<br/>could wait 60s"]
-        T1 --> C1 --> E1 --> M1
-    end
-
-    subgraph after["✅ AFTER: Per-Operation Timeouts"]
-        C2["Cache Check<br/>no timeout needed"]
-        E2["ES Query<br/>timeout: 30s"]
-        M2["MongoDB Write<br/>timeout: 15s"]
-        C2 --> E2 --> M2
-    end
+          <div class="takeaway-card">
+            <div class="takeaway-num">4</div>
+            <div class="takeaway-content">
+              <strong>Timeouts must be per-operation</strong>
+              <p>One global 60-second timeout wrapping (cache + ES + MongoDB) wastes latency budget and leaks contexts when upstream is slow. Each downstream call deserves its own timeout: 30s for ES, 15s for MongoDB, nothing for cache. Shared deadlines punish the fast for the slow.</p>
             </div>
-            <p class="diagram-caption">Figure 4 — Single monolithic timeout vs. per-operation timeouts</p>
           </div>
-
-          <h3 id="fix2">The Fix</h3>
-
-          <div class="code-block">
-            <div class="code-label">
-              <div class="code-dot code-dot-r"></div>
-              <div class="code-dot code-dot-y"></div>
-              <div class="code-dot code-dot-g"></div>
-              <span class="code-filename">visitor_processor.go (FIXED)</span>
+          <div class="takeaway-card">
+            <div class="takeaway-num">5</div>
+            <div class="takeaway-content">
+              <strong>Batch everything that touches memory</strong>
+              <p>Loading 50K Redis keys into a Go map: 480 MiB spike. Processing 100 at a time: ~10 MiB. A 98% reduction from a trivial change. If you're loading "all of X" into memory, you're probably wrong. The answer is almost always "scan in batches and release."</p>
             </div>
-            <pre class="language-go"><code class="language-go">// FIX 1: Halve the cache budget
-cache, _ := ristretto.NewCache(&ristretto.Config{
-    NumCounters: 5e6,       // 5M keys (was 10M)
-    MaxCost:     500 &lt;&lt; 20, // 500 MB (was 1 GB)
-})
-
-// FIX 2: Per-operation timeouts
-esCtx, esCancel := context.WithTimeout(baseCtx, 30*time.Second)
-existsInES, _ := repo.VisitorExistsInES(esCtx, ...)
-esCancel()  // Release immediately
-
-mongoCtx, mongoCancel := context.WithTimeout(baseCtx, 15*time.Second)
-repo.IncrementWeeklyUniqueVisitors(mongoCtx, ...)
-mongoCancel()
-
-// FIX 3: Debug logs instead of Info in hot path
-logger.Debug("visitor cache hit")  // was Info</code></pre>
           </div>
-
-          <p>
-            <strong>Impact:</strong> Peak memory dropped from 1.2–1.5 GB to 400–500 MB. OOM kills: eliminated.
-          </p>
-        </section>
+          <div class="takeaway-card">
+            <div class="takeaway-num">6</div>
+            <div class="takeaway-content">
+              <strong>Cache your expensive setup operations</strong>
+              <p>500 <code>SCRIPT LOAD</code> calls/sec exhausted our Redis connection pool. Pre-computing the SHA at startup: zero extra roundtrips per flush. Same principle applies to compiled regexes, prepared SQL statements, and TLS session resumption.</p>
+            </div>
+          </div>
+          <div class="takeaway-card">
+            <div class="takeaway-num">7</div>
+            <div class="takeaway-content">
+              <strong>Sometimes you have to delete and rewrite</strong>
+              <p>I tried patching the <code>OrderedEventProcessor</code> for 5 months. Each fix helped but the architecture was fundamentally wrong: goroutine-per-user will always leak, and load-all will always spike. The rewrite (1,291 LOC → 309 LOC) solved all six root causes simultaneously. Know when incremental fixes are just postponing the inevitable.</p>
+            </div>
+          </div>
+        </div>
 
         <hr />
 
-        <section id="takeaways">
-          <h2>Key Takeaways</h2>
+        <h2 id="timeline">The War Timeline</h2>
 
-          <div class="takeaways-grid">
-            <div class="takeaway-card">
-              <div class="takeaway-num">01</div>
-              <div class="takeaway-content">
-                <strong>Unbounded concurrency is a time bomb</strong>
-                <p>A <code>sync.Map</code> that spawns goroutines "looks safe" but creates a leak that only manifests under sustained load. Always set explicit bounds on any concurrent resource.</p>
-              </div>
-            </div>
-            <div class="takeaway-card">
-              <div class="takeaway-num">02</div>
-              <div class="takeaway-content">
-                <strong>Backpressure &gt; buffering</strong>
-                <p>Without backpressure, Kafka keeps pushing messages into an overwhelmed consumer. The fix: block the consumer loop when the memory budget is exhausted. Let Kafka handle the queue — that's what it's for.</p>
-              </div>
-            </div>
-            <div class="takeaway-card">
-              <div class="takeaway-num">03</div>
-              <div class="takeaway-content">
-                <strong>Memory budgets need dual limits</strong>
-                <p>"Max 512 messages" isn't enough — one 100 MiB message blows the budget. Track both message count AND byte size together.</p>
-              </div>
-            </div>
-            <div class="takeaway-card">
-              <div class="takeaway-num">04</div>
-              <div class="takeaway-content">
-                <strong>Timeouts must be per-operation</strong>
-                <p>One global 60-second timeout for (cache + ES + MongoDB) wastes latency budget and hides which operation is actually slow. Separate timeouts let each operation fail independently and surface the real bottleneck.</p>
-              </div>
-            </div>
-            <div class="takeaway-card">
-              <div class="takeaway-num">05</div>
-              <div class="takeaway-content">
-                <strong>Logging in hot paths kills performance</strong>
-                <p>1,000 <code>Info</code> logs/sec = 1,000 heap allocations/sec = GC pressure. Use <code>Debug</code> for cache hits; <code>Info</code> for misses and errors only. Structured logging fields still allocate.</p>
-              </div>
-            </div>
-            <div class="takeaway-card">
-              <div class="takeaway-num">06</div>
-              <div class="takeaway-content">
-                <strong>Batch processing reduces peak memory by 98%</strong>
-                <p>Loading 50K Redis keys at once → 480 MiB spike. Processing 100 at a time with <code>SCAN</code> → ~10 MiB steady state. Always scan-and-batch for bulk operations — never <code>KEYS *</code>.</p>
-              </div>
-            </div>
-            <div class="takeaway-card">
-              <div class="takeaway-num">07</div>
-              <div class="takeaway-content">
-                <strong>Cache your Redis Lua scripts</strong>
-                <p>500 <code>SCRIPT LOAD</code> calls/sec = connection pool exhaustion + wasted bandwidth. Pre-compute the SHA1 at startup with <code>SCRIPT LOAD</code> once, then call <code>EVALSHA</code> for every subsequent execution.</p>
-              </div>
-            </div>
+        <div class="timeline">
+          <div class="tl-item">
+            <div class="tl-dot phase-1"></div>
+            <div class="tl-date">August 25, 2025</div>
+            <div class="tl-event">100M messages stuck. Pipeline blocked.</div>
+            <div class="tl-impact">Kafka lag growing unbounded. War room declared.</div>
           </div>
-        </section>
+          <div class="tl-item">
+            <div class="tl-dot phase-1"></div>
+            <div class="tl-date">August 27–28, 2025</div>
+            <div class="tl-event">12 hotfix commits in 48 hours.</div>
+            <div class="tl-impact">Worker pool 150→50. Race condition fixed. Bounded semaphore added. Pipeline restored.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot neutral"></div>
+            <div class="tl-date">October 24, 2025</div>
+            <div class="tl-event">Visitor tracking feature ships.</div>
+            <div class="tl-impact">1 GB Ristretto cache in a 512 MiB pod. The clock starts ticking.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-2"></div>
+            <div class="tl-date">November – December 2025</div>
+            <div class="tl-event">OOM kills begin. 30 pods on sawtooth cycle.</div>
+            <div class="tl-impact">Memory: 32 → 512 MiB → kill → repeat. Grafana shows perfect sawtooth on all pods.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-2"></div>
+            <div class="tl-date">December 4, 2025</div>
+            <div class="tl-event">Cache reduced 1 GB → 500 MB. Per-op timeouts. Debug logs.</div>
+            <div class="tl-impact">OOM frequency reduced. Sawtooth slows but persists.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot neutral"></div>
+            <div class="tl-date">December 12, 2025</div>
+            <div class="tl-event">Visitor checks migrated MongoDB → Redis.</div>
+            <div class="tl-impact">190ms MongoDB upsert per event eliminated from hot path.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot neutral"></div>
+            <div class="tl-date">January 6, 2026</div>
+            <div class="tl-event">Profit optimizer MongoDB dependency removed.</div>
+            <div class="tl-impact">Simpler architecture. Fewer moving parts per event.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-3"></div>
+            <div class="tl-date">March 12–18, 2026</div>
+            <div class="tl-event">1 week of pprof profiling. Still sawtoothing.</div>
+            <div class="tl-impact">6 root causes identified: goroutine-per-user, load-all flush, SCRIPT LOAD, stale attribution, duplicate goroutines, shared timeout.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-3"></div>
+            <div class="tl-date">March 26, 2026</div>
+            <div class="tl-event">Nuclear option: delete 1,585 LOC, rewrite as 309 LOC bounded dispatcher.</div>
+            <div class="tl-impact">All 6 root causes resolved in one rewrite. Memory drops to flat &lt; 200 MiB.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-3"></div>
+            <div class="tl-date">March 30, 2026</div>
+            <div class="tl-event">SHTP-6414 hardened: async stages, dedup, dual-budget backpressure.</div>
+            <div class="tl-impact"><strong>Production stable 30+ days. Zero OOM kills.</strong></div>
+          </div>
+        </div>
 
       </article>
 
@@ -1252,204 +1221,124 @@ logger.Debug("visitor cache hit")  // was Info</code></pre>
           <div>
             <div class="author-name">Nghia Nguyen</div>
             <div class="author-role">Senior Software Engineer II · TrueProfit</div>
-            <div class="author-bio">
-              Engineering distributed systems in Go and building high-throughput data pipelines for e-commerce analytics. Based in Ho Chi Minh City, Vietnam.
-              <br/><br/>
-              <a href="../index.html" class="author-link">Back to portfolio →</a>
-            </div>
+            <div class="author-bio">I build distributed systems that process e-commerce data at scale. I write about Go, Kafka, performance engineering, and production incidents — the kind that teach you things no book does. <a href="../index.html" class="author-link">More writing and projects →</a></div>
           </div>
         </div>
 
         <div class="footer-tags">
-          <span class="footer-tag">Go</span>
-          <span class="footer-tag">Kafka</span>
-          <span class="footer-tag">Distributed Systems</span>
-          <span class="footer-tag">Performance Engineering</span>
-          <span class="footer-tag">Production Incidents</span>
-          <span class="footer-tag">Elasticsearch</span>
-          <span class="footer-tag">Redis</span>
-          <span class="footer-tag">MongoDB</span>
+          <a href="#" class="footer-tag">Go</a>
+          <a href="#" class="footer-tag">Kafka</a>
+          <a href="#" class="footer-tag">Distributed Systems</a>
+          <a href="#" class="footer-tag">Performance Engineering</a>
+          <a href="#" class="footer-tag">OOM</a>
+          <a href="#" class="footer-tag">Production Incidents</a>
+          <a href="#" class="footer-tag">Concurrency</a>
+          <a href="#" class="footer-tag">Backpressure</a>
         </div>
 
         <div class="share-row">
           <span class="share-label">Share</span>
-          <a class="share-btn" href="https://twitter.com/intent/tweet?text=How+I+Fixed+a+100M%2B+Message+Pipeline+Bottleneck+and+Recurring+OOM+Crashes&url=https%3A%2F%2Fnghia-nguyen.pages.dev%2Fblog%2Fkafka-oom-pipeline.html" target="_blank" rel="noopener">
+          <a class="share-btn" href="https://twitter.com/intent/tweet?text=From%20100M%20Stuck%20Messages%20to%20Zero%20OOM%3A%20A%207-Month%20War%20with%20a%20Go%20Event%20Pipeline&url=https://nghia-nguyen.dev/blog/kafka-oom-pipeline.html" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
             X / Twitter
           </a>
-          <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fnghia-nguyen.pages.dev%2Fblog%2Fkafka-oom-pipeline.html" target="_blank" rel="noopener">
+          <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url=https://nghia-nguyen.dev/blog/kafka-oom-pipeline.html" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
             LinkedIn
           </a>
         </div>
-
-        <div class="nav-articles">
-          <a href="#" class="nav-article-card prev" style="opacity:0.4;pointer-events:none;">
-            <div class="nav-article-dir">← Previous</div>
-            <div class="nav-article-title">No previous article</div>
-          </a>
-          <a href="#" class="nav-article-card next" style="opacity:0.4;pointer-events:none;">
-            <div class="nav-article-dir">Next →</div>
-            <div class="nav-article-title">More articles coming soon</div>
-          </a>
-        </div>
       </footer>
-
     </main>
   </div>
 
   <script>
-    // ─── Theme Toggle ───
+    // Theme toggle
     const html = document.documentElement;
-    const themeBtn = document.getElementById('themeToggle');
-    const iconMoon = document.getElementById('iconMoon');
-    const iconSun = document.getElementById('iconSun');
-
-    function getTheme() { return html.getAttribute('data-theme'); }
+    const btn = document.getElementById('themeToggle');
+    const sun = document.getElementById('sunIcon');
+    const moon = document.getElementById('moonIcon');
 
     function applyTheme(theme) {
       html.setAttribute('data-theme', theme);
-      if (theme === 'light') {
-        iconMoon.style.display = 'none';
-        iconSun.style.display = 'block';
-      } else {
-        iconMoon.style.display = 'block';
-        iconSun.style.display = 'none';
-      }
-      // Re-init Mermaid with correct theme
-      const mermaidTheme = theme === 'light' ? 'default' : 'dark';
+      sun.style.display = theme === 'dark' ? 'block' : 'none';
+      moon.style.display = theme === 'light' ? 'block' : 'none';
+      // Re-initialize Mermaid with appropriate theme
       mermaid.initialize({
         startOnLoad: false,
-        theme: mermaidTheme,
+        theme: theme === 'dark' ? 'dark' : 'default',
         themeVariables: theme === 'dark' ? {
+          background: '#111111',
           primaryColor: '#1e293b',
-          primaryTextColor: '#e2e8f0',
-          primaryBorderColor: '#334155',
-          lineColor: '#64748b',
-          secondaryColor: '#1e293b',
-          tertiaryColor: '#0f172a',
-          background: '#0f172a',
-          mainBkg: '#1e293b',
-          nodeBorder: '#334155',
-          clusterBkg: '#0f172a',
-          titleColor: '#e2e8f0',
-          edgeLabelBackground: '#1e293b',
-          fontFamily: 'Inter, sans-serif',
-          fontSize: '13px',
+          primaryTextColor: '#f0f0f0',
+          primaryBorderColor: 'rgba(255,255,255,0.14)',
+          lineColor: '#555',
+          secondaryColor: '#181818',
+          tertiaryColor: '#1e1e1e',
+          edgeLabelBackground: '#111111',
+          clusterBkg: '#181818',
+          titleColor: '#f0f0f0',
+          nodeBorder: 'rgba(255,255,255,0.14)',
         } : {
-          fontFamily: 'Inter, sans-serif',
-          fontSize: '13px',
+          background: '#f2f2f2',
+          primaryColor: '#e0e7ff',
+          primaryTextColor: '#0f0f0f',
         }
       });
-      rerenderMermaid();
-      localStorage.setItem('theme', theme);
-    }
-
-    themeBtn.addEventListener('click', () => {
-      applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
-    });
-
-    // ─── Mermaid ───
-    const diagramSources = {};
-
-    async function rerenderMermaid() {
-      const diagrams = document.querySelectorAll('.mermaid');
-      for (const el of diagrams) {
-        const id = el.id;
-        if (!id) continue;
-        const source = diagramSources[id];
-        if (!source) continue;
-        el.removeAttribute('data-processed');
-        el.innerHTML = source;
-        try {
-          const { svg } = await mermaid.render('mermaid-svg-' + id + '-' + Date.now(), source);
-          el.innerHTML = svg;
-        } catch(e) {
-          console.warn('Mermaid render error for', id, e);
-        }
-      }
-    }
-
-    async function initMermaid() {
-      // Save sources before mermaid processes them
+      // Re-render all mermaid diagrams
       document.querySelectorAll('.mermaid').forEach(el => {
-        if (el.id) diagramSources[el.id] = el.textContent.trim();
+        const src = el.getAttribute('data-src') || el.textContent;
+        if (!el.getAttribute('data-src')) el.setAttribute('data-src', src);
+        el.removeAttribute('data-processed');
+        el.textContent = src;
       });
+      mermaid.run({ querySelector: '.mermaid' });
+    }
 
-      const theme = getTheme();
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: theme === 'light' ? 'default' : 'dark',
-        themeVariables: theme === 'dark' ? {
-          primaryColor: '#1e293b',
-          primaryTextColor: '#e2e8f0',
-          primaryBorderColor: '#334155',
-          lineColor: '#64748b',
-          secondaryColor: '#1e293b',
-          tertiaryColor: '#0f172a',
-          background: '#0f172a',
-          mainBkg: '#1e293b',
-          nodeBorder: '#334155',
-          clusterBkg: '#0f172a',
-          titleColor: '#e2e8f0',
-          edgeLabelBackground: '#1e293b',
-          fontFamily: 'Inter, sans-serif',
-          fontSize: '13px',
-        } : {
-          fontFamily: 'Inter, sans-serif',
-          fontSize: '13px',
-        }
-      });
+    btn.addEventListener('click', () => {
+      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', next);
+      applyTheme(next);
+    });
 
-      for (const el of document.querySelectorAll('.mermaid')) {
-        const id = el.id;
-        if (!id || !diagramSources[id]) continue;
-        try {
-          const { svg } = await mermaid.render('mermaid-init-' + id, diagramSources[id]);
-          el.innerHTML = svg;
-        } catch(e) {
-          console.warn('Mermaid init error for', id, e);
-        }
+    // Init theme
+    const saved = localStorage.getItem('theme') || 'dark';
+    applyTheme(saved);
+
+    // Mobile TOC
+    const mobileBtn = document.getElementById('mobileTocBtn');
+    const mobilePanel = document.getElementById('mobileTocPanel');
+    const mobileTocWrapper = document.getElementById('mobileTocWrapper');
+
+    function checkMobile() {
+      if (window.innerWidth <= 900) {
+        mobileTocWrapper.style.display = 'block';
+      } else {
+        mobileTocWrapper.style.display = 'none';
       }
     }
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
 
-    // ─── TOC Mobile Toggle ───
-    const tocMobileToggle = document.getElementById('tocMobileToggle');
-    const tocMobilePanel = document.getElementById('tocMobilePanel');
-
-    tocMobileToggle.addEventListener('click', () => {
-      const open = tocMobilePanel.classList.toggle('open');
-      tocMobileToggle.classList.toggle('open', open);
-      tocMobileToggle.setAttribute('aria-expanded', String(open));
+    mobileBtn?.addEventListener('click', () => {
+      const open = mobilePanel.classList.toggle('open');
+      mobileBtn.classList.toggle('open', open);
     });
 
-    // ─── Active TOC highlight ───
-    function setupTOCHighlight() {
-      const headings = document.querySelectorAll('h2[id], h3[id]');
-      const tocLinks = document.querySelectorAll('#tocList a');
+    // Active TOC on scroll
+    const headings = document.querySelectorAll('.prose h2[id], .prose h3[id]');
+    const tocLinks = document.querySelectorAll('#tocList a');
 
-      const observer = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            tocLinks.forEach(a => a.classList.remove('active'));
-            const active = document.querySelector(`#tocList a[href="#${entry.target.id}"]`);
-            if (active) active.classList.add('active');
-          }
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          tocLinks.forEach(a => a.classList.remove('active'));
+          const active = document.querySelector(`#tocList a[href="#${entry.target.id}"]`);
+          if (active) active.classList.add('active');
         }
-      }, { rootMargin: '-64px 0px -60% 0px', threshold: 0 });
+      });
+    }, { rootMargin: '-60px 0px -70% 0px' });
 
-      headings.forEach(h => observer.observe(h));
-    }
-
-    // ─── Init ───
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme) applyTheme(savedTheme);
-    else applyTheme('dark');
-
-    document.addEventListener('DOMContentLoaded', () => {
-      initMermaid();
-      setupTOCHighlight();
-    });
+    headings.forEach(h => observer.observe(h));
   </script>
 </body>
 </html>
