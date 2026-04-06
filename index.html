@@ -1653,7 +1653,11 @@
         </div>
 
         <div class="fade-up fade-up-d2">
-          <form class="contact-form" onsubmit="handleSubmit(event)">
+          <form class="contact-form" action="https://formsubmit.co/ngocnghia128@gmail.com" method="POST" id="contactForm">
+            <input type="hidden" name="_subject" value="New contact from Portfolio" />
+            <input type="hidden" name="_captcha" value="false" />
+            <input type="hidden" name="_next" value="https://nghiack7.github.io/nghia-nguyen/#contact" />
+            <input type="text" name="_honey" style="display:none" />
             <div class="form-row">
               <div class="form-field">
                 <label for="name">Name</label>
@@ -1825,21 +1829,41 @@
 
     sections.forEach(s => navObserver.observe(s));
 
-    // ─── Contact Form ───
-    function handleSubmit(e) {
+    // ─── Contact Form (FormSubmit.co) ───
+    const contactForm = document.getElementById('contactForm');
+    contactForm.addEventListener('submit', async function(e) {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Sent!';
-      btn.style.background = '#22c55e';
+      btn.innerHTML = 'Sending...';
       btn.disabled = true;
-      // In production, wire to a form service (e.g. Formspree, Web3Forms)
-      setTimeout(() => {
-        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send Message';
-        btn.style.background = '';
+      try {
+        const res = await fetch(this.action, {
+          method: 'POST',
+          body: new FormData(this),
+          headers: { 'Accept': 'application/json' }
+        });
+        if (res.ok) {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Sent!';
+          btn.style.background = '#22c55e';
+          this.reset();
+          setTimeout(() => {
+            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send Message';
+            btn.style.background = '';
+            btn.disabled = false;
+          }, 3000);
+        } else {
+          throw new Error('Failed');
+        }
+      } catch {
+        btn.innerHTML = 'Failed — try email directly';
+        btn.style.background = '#ef4444';
         btn.disabled = false;
-        e.target.reset();
-      }, 3000);
-    }
+        setTimeout(() => {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send Message';
+          btn.style.background = '';
+        }, 3000);
+      }
+    });
   </script>
 
 </body>
