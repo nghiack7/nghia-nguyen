@@ -1574,20 +1574,22 @@
         <h2 class="section-title">Thinking out loud.</h2>
         <p class="section-sub">Technical writing on Go, distributed systems, and building products as an engineer-founder.</p>
       </div>
-      <div class="blog-coming-soon fade-up fade-up-d2">
-        <div class="blog-icon">✍️</div>
-        <div class="blog-coming-title">Coming Soon</div>
-        <p class="blog-coming-sub">
-          I'm working on articles about the things I actually care about — not tutorials, but real problems from production systems and product building.
-        </p>
-        <div class="blog-topics">
-          <span class="tag">Go concurrency patterns</span>
-          <span class="tag">System design in practice</span>
-          <span class="tag">Building as a solo founder-engineer</span>
-          <span class="tag">Postgres in depth</span>
-          <span class="tag">Kafka at scale</span>
-          <span class="tag">Lessons from 6 years backend</span>
-        </div>
+      <div class="blog-posts fade-up fade-up-d2" style="display:grid;gap:1.5rem;">
+        <a href="blog/kafka-oom-pipeline.html" style="display:block;padding:2rem;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);text-decoration:none;color:var(--text);transition:border-color 0.2s,transform 0.2s;" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)';this.style.transform='translateY(0)'">
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">
+            <span class="tag">Go</span>
+            <span class="tag">Kafka</span>
+            <span class="tag">Performance</span>
+            <span class="tag">Production Incidents</span>
+          </div>
+          <div style="font-size:1.25rem;font-weight:700;margin-bottom:0.5rem;">How I Fixed a 100M+ Message Pipeline Bottleneck and Recurring OOM Crashes</div>
+          <div style="color:var(--text-muted);font-size:0.9rem;line-height:1.6;">Lessons from debugging unbounded concurrency, memory leaks, and backpressure in a high-throughput Go event processor. 99.7% goroutine reduction, 98% memory reduction.</div>
+          <div style="color:var(--text-dim);font-size:0.8rem;margin-top:0.75rem;">April 2026 · 12 min read</div>
+        </a>
+      </div>
+
+      <div class="blog-coming-soon fade-up fade-up-d3" style="margin-top:2rem;">
+        <p style="color:var(--text-muted);text-align:center;font-size:0.9rem;">More articles coming — system design, Postgres deep dives, and building as a founder-engineer.</p>
       </div>
     </div>
   </section>
