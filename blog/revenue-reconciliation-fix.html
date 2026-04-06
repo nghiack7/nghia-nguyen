@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>When Every Dollar Counts: Rewriting Revenue From Source of Truth — Nghia Nguyen</title>
+  <meta name="description" content="How I fixed broken revenue calculations in TrueProfit's reportfns by throwing out incremental patches and recalculating from Shopify's raw order data — and why a reconciliation job got rejected." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/prismjs@1/themes/prism-tomorrow.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-go.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0a;
+      --bg-2: #111111;
+      --bg-3: #181818;
+      --bg-4: #1e1e1e;
+      --border: rgba(255,255,255,0.08);
+      --border-strong: rgba(255,255,255,0.14);
+      --text: #f0f0f0;
+      --text-muted: #888;
+      --text-dim: #555;
+      --accent: #3b82f6;
+      --accent-dim: rgba(59,130,246,0.12);
+      --accent-2: #f59e0b;
+      --accent-2-dim: rgba(245,158,11,0.12);
+      --green: #22c55e;
+      --green-dim: rgba(34,197,94,0.1);
+      --red: #ef4444;
+      --red-dim: rgba(239,68,68,0.1);
+      --orange: #f97316;
+      --orange-dim: rgba(249,115,22,0.1);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --nav-h: 60px;
+      --toc-w: 240px;
+      --content-max: 720px;
+    }
+
+    [data-theme="light"] {
+      --bg: #fafafa;
+      --bg-2: #f2f2f2;
+      --bg-3: #e8e8e8;
+      --bg-4: #efefef;
+      --border: rgba(0,0,0,0.08);
+      --border-strong: rgba(0,0,0,0.14);
+      --text: #0f0f0f;
+      --text-muted: #555;
+      --text-dim: #aaa;
+      --accent: #2563eb;
+      --accent-dim: rgba(37,99,235,0.08);
+      --accent-2: #d97706;
+      --accent-2-dim: rgba(217,119,6,0.1);
+      --green: #16a34a;
+      --green-dim: rgba(22,163,74,0.08);
+      --red: #dc2626;
+      --red-dim: rgba(220,38,38,0.08);
+      --orange: #ea580c;
+      --orange-dim: rgba(234,88,12,0.08);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      overflow-x: hidden;
+      transition: background 0.25s, color 0.25s;
+      font-size: 16px;
+    }
+
+    ::selection { background: var(--accent); color: #fff; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.4;
+    }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: var(--nav-h);
+      z-index: 100;
+      background: rgba(10,10,10,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 16px;
+      transition: background 0.25s;
+    }
+    [data-theme="light"] nav { background: rgba(250,250,250,0.88); }
+
+    .nav-back {
+      display: flex; align-items: center; gap: 6px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
+      transition: color 0.2s;
+    }
+    .nav-back:hover { color: var(--accent); }
+    .nav-back svg { width: 14px; height: 14px; }
+    .nav-sep { width: 1px; height: 16px; background: var(--border-strong); }
+    .nav-title { font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; max-width: 480px; }
+    .nav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+    .theme-btn {
+      width: 34px; height: 34px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-3);
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .theme-btn:hover { background: var(--bg-4); color: var(--text); border-color: var(--border-strong); }
+    .theme-btn svg { width: 16px; height: 16px; }
+
+    /* Layout */
+    .page-wrapper {
+      display: flex;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-top: var(--nav-h);
+      padding-left: 24px;
+      padding-right: 24px;
+      gap: 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* TOC Sidebar */
+    .toc-sidebar {
+      width: var(--toc-w);
+      flex-shrink: 0;
+      position: sticky;
+      top: calc(var(--nav-h) + 32px);
+      height: calc(100vh - var(--nav-h) - 64px);
+      overflow-y: auto;
+      padding-top: 40px;
+      display: flex;
+      flex-direction: column;
+    }
+    .toc-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-dim); margin-bottom: 12px;
+    }
+    .toc-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+    .toc-list a {
+      display: block; font-size: 12.5px; color: var(--text-muted);
+      text-decoration: none; padding: 5px 10px;
+      border-left: 2px solid transparent;
+      border-radius: 0 4px 4px 0;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      line-height: 1.4;
+    }
+    .toc-list a:hover { color: var(--text); border-left-color: var(--border-strong); }
+    .toc-list a.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
+    .toc-list .toc-sub a { padding-left: 20px; font-size: 12px; }
+
+    /* Mobile TOC */
+    .toc-mobile-toggle {
+      display: none;
+      width: 100%;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      align-items: center;
+      gap: 8px;
+      margin: 16px 0;
+      transition: background 0.2s;
+    }
+    .toc-mobile-toggle:hover { background: var(--bg-4); }
+    .toc-mobile-toggle svg { width: 14px; height: 14px; margin-left: auto; transition: transform 0.2s; }
+    .toc-mobile-toggle.open svg { transform: rotate(180deg); }
+    .toc-mobile-panel { display: none; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 0; margin-bottom: 24px; }
+    .toc-mobile-panel.open { display: block; }
+
+    /* Article */
+    .article-main {
+      flex: 1; min-width: 0;
+      padding-top: 40px; padding-bottom: 80px;
+      max-width: var(--content-max);
+    }
+
+    /* Hero */
+    .article-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+    .tag {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+      text-transform: uppercase; padding: 3px 9px; border-radius: 100px;
+      background: var(--accent-dim); color: var(--accent);
+      border: 1px solid rgba(59,130,246,0.2);
+    }
+    .tag-orange { background: var(--orange-dim); color: var(--orange); border-color: rgba(249,115,22,0.2); }
+    .tag-green { background: var(--green-dim); color: var(--green); border-color: rgba(34,197,94,0.2); }
+
+    .article-title {
+      font-size: clamp(26px, 4vw, 38px);
+      font-weight: 800; line-height: 1.2; letter-spacing: -0.02em;
+      color: var(--text); margin-bottom: 14px;
+    }
+    .article-subtitle {
+      font-size: 17px; color: var(--text-muted); font-weight: 400;
+      line-height: 1.6; margin-bottom: 28px; max-width: 600px;
+    }
+    .article-meta {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding: 16px 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 48px;
+    }
+    .meta-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
+    }
+    .meta-info { flex: 1; }
+    .meta-author { font-size: 13px; font-weight: 600; color: var(--text); }
+    .meta-details { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+    .meta-reading {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--text-muted);
+      background: var(--bg-3); padding: 6px 12px;
+      border-radius: 100px; border: 1px solid var(--border);
+    }
+    .meta-reading svg { width: 13px; height: 13px; color: var(--accent); }
+
+    /* Prose */
+    .prose h2 {
+      font-size: 22px; font-weight: 700; letter-spacing: -0.01em;
+      color: var(--text); margin-top: 56px; margin-bottom: 16px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--nav-h) + 24px);
+    }
+    .prose h3 {
+      font-size: 17px; font-weight: 600; color: var(--text);
+      margin-top: 36px; margin-bottom: 12px;
+      scroll-margin-top: calc(var(--nav-h) + 24px);
+    }
+    .prose p { font-size: 16px; color: var(--text); margin-bottom: 20px; line-height: 1.8; }
+    .prose strong { color: var(--text); font-weight: 600; }
+    .prose ul, .prose ol { margin: 0 0 20px 24px; }
+    .prose li { font-size: 16px; color: var(--text); line-height: 1.8; margin-bottom: 6px; }
+    .prose a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(59,130,246,0.3); transition: border-color 0.2s; }
+    .prose a:hover { border-bottom-color: var(--accent); }
+
+    /* Incident banner */
+    .incident-banner {
+      display: flex; align-items: flex-start; gap: 14px;
+      background: var(--red-dim);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-left: 3px solid var(--red);
+      border-radius: var(--radius-sm);
+      padding: 16px 18px; margin: 0 0 28px;
+    }
+    .incident-banner .banner-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+    .incident-banner .banner-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--red); margin-bottom: 4px; }
+    .incident-banner .banner-body { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+    /* Info banner */
+    .info-banner {
+      display: flex; align-items: flex-start; gap: 14px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(59,130,246,0.2);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 16px 18px; margin: 0 0 28px;
+    }
+    .info-banner .banner-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+    .info-banner .banner-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); margin-bottom: 4px; }
+    .info-banner .banner-body { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+    /* Warning banner */
+    .warning-banner {
+      display: flex; align-items: flex-start; gap: 14px;
+      background: var(--orange-dim);
+      border: 1px solid rgba(249,115,22,0.2);
+      border-left: 3px solid var(--orange);
+      border-radius: var(--radius-sm);
+      padding: 16px 18px; margin: 0 0 28px;
+    }
+    .warning-banner .banner-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+    .warning-banner .banner-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--orange); margin-bottom: 4px; }
+    .warning-banner .banner-body { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+    /* Phase banners */
+    .phase-banner {
+      display: flex; align-items: center; gap: 14px;
+      border-radius: var(--radius-sm);
+      padding: 14px 18px; margin: 0 0 28px;
+    }
+    .phase-banner.p1 { background: var(--red-dim); border: 1px solid rgba(239,68,68,0.2); border-left: 3px solid var(--red); }
+    .phase-banner.p2 { background: var(--orange-dim); border: 1px solid rgba(249,115,22,0.2); border-left: 3px solid var(--orange); }
+    .phase-banner.p3 { background: var(--green-dim); border: 1px solid rgba(34,197,94,0.2); border-left: 3px solid var(--green); }
+    .phase-banner .ph-num { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7; }
+    .phase-banner.p1 .ph-num { color: var(--red); }
+    .phase-banner.p2 .ph-num { color: var(--orange); }
+    .phase-banner.p3 .ph-num { color: var(--green); }
+    .phase-banner .ph-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .phase-banner .ph-date { font-size: 12px; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
+
+    /* Code blocks */
+    .code-block {
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden;
+      margin: 24px 0; font-size: 13.5px;
+    }
+    .code-label {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 14px; border-bottom: 1px solid var(--border);
+      background: var(--bg-4);
+    }
+    .code-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .code-dot-r { background: #ef4444; }
+    .code-dot-y { background: #f59e0b; }
+    .code-dot-g { background: #22c55e; }
+    .code-filename { font-size: 11px; color: var(--text-dim); margin-left: 4px; font-family: 'Fira Code', monospace; }
+    .code-block pre[class*="language-"] {
+      margin: 0; padding: 18px 20px;
+      background: transparent !important;
+      font-size: 13px; line-height: 1.7; overflow-x: auto; tab-size: 2;
+    }
+    .code-block code[class*="language-"] { font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace; }
+
+    /* Inline code */
+    .prose code:not([class*="language-"]) {
+      font-family: 'Fira Code', 'JetBrains Mono', monospace;
+      font-size: 13px; background: var(--bg-3); border: 1px solid var(--border);
+      padding: 1px 6px; border-radius: 4px; color: var(--accent-2);
+    }
+
+    /* Mermaid diagrams */
+    .diagram-wrapper {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px 20px;
+      margin: 28px 0; overflow-x: auto;
+    }
+    .diagram-caption { text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 12px; font-style: italic; }
+    .diagram-wrapper .mermaid { display: flex; justify-content: center; }
+
+    /* Tables */
+    .table-wrapper {
+      overflow-x: auto; margin: 24px 0;
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    thead tr { background: var(--bg-3); }
+    thead th {
+      padding: 11px 16px; text-align: left;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--text-muted);
+      border-bottom: 1px solid var(--border-strong);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    [data-theme="light"] tbody tr:nth-child(even) { background: rgba(0,0,0,0.02); }
+    tbody tr:hover { background: var(--accent-dim); }
+    tbody td { padding: 11px 16px; color: var(--text-muted); vertical-align: top; line-height: 1.5; }
+    tbody td:first-child { color: var(--text); font-weight: 500; }
+
+    /* Result table */
+    .result-table tbody td:nth-child(2) { color: var(--red); font-weight: 500; }
+    .result-table tbody td:last-child { color: var(--green); font-weight: 600; }
+
+    /* Takeaway cards */
+    .takeaways-grid { display: flex; flex-direction: column; gap: 14px; margin: 28px 0; }
+    .takeaway-card {
+      display: flex; gap: 16px; align-items: flex-start;
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm); padding: 16px 18px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .takeaway-card:hover { background: var(--bg-3); border-left-color: var(--accent-2); }
+    .takeaway-num {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+      color: var(--accent); background: var(--accent-dim);
+      border: 1px solid rgba(59,130,246,0.2);
+      min-width: 28px; height: 28px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 1px;
+    }
+    .takeaway-content strong { display: block; font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
+    .takeaway-content p { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; margin: 0; }
+
+    /* Timeline */
+    .timeline { position: relative; margin: 32px 0; padding-left: 28px; }
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 7px; top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--red), var(--orange), var(--green));
+      border-radius: 2px;
+    }
+    .tl-item { position: relative; margin-bottom: 24px; }
+    .tl-item:last-child { margin-bottom: 0; }
+    .tl-dot {
+      position: absolute;
+      left: -24px; top: 4px;
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid var(--bg);
+      flex-shrink: 0;
+    }
+    .tl-dot.phase-1 { background: var(--red); box-shadow: 0 0 0 3px rgba(239,68,68,0.2); }
+    .tl-dot.phase-2 { background: var(--orange); box-shadow: 0 0 0 3px rgba(249,115,22,0.2); }
+    .tl-dot.phase-3 { background: var(--green); box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
+    .tl-dot.neutral { background: var(--text-dim); box-shadow: 0 0 0 3px rgba(100,100,100,0.15); }
+    .tl-date { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 3px; }
+    .tl-event { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+    .tl-impact { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
+    /* Divider */
+    .prose hr { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+
+    /* Footer */
+    .article-footer { margin-top: 64px; padding-top: 32px; border-top: 1px solid var(--border); }
+    .author-card {
+      display: flex; gap: 18px; align-items: flex-start;
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px 22px; margin-bottom: 32px;
+    }
+    .author-avatar {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; font-weight: 800; color: #fff; flex-shrink: 0;
+    }
+    .author-name { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .author-role { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+    .author-bio { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+    .author-link { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(59,130,246,0.3); transition: border-color 0.2s; }
+    .author-link:hover { border-bottom-color: var(--accent); }
+    .footer-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px; }
+    .footer-tag {
+      font-size: 12px; font-weight: 500; padding: 4px 12px;
+      border-radius: 100px; border: 1px solid var(--border-strong);
+      color: var(--text-muted); text-decoration: none;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .footer-tag:hover { background: var(--accent-dim); color: var(--accent); border-color: rgba(59,130,246,0.3); }
+    .share-row { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+    .share-label { font-size: 12px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+    .share-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 14px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--bg-3);
+      color: var(--text-muted); font-size: 12px; font-weight: 500;
+      font-family: 'Inter', sans-serif; cursor: pointer; text-decoration: none;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .share-btn:hover { background: var(--bg-4); color: var(--text); border-color: var(--border-strong); }
+    .share-btn svg { width: 14px; height: 14px; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .toc-sidebar { display: none; }
+      .toc-mobile-toggle { display: flex; }
+      .page-wrapper { gap: 0; padding-left: 16px; padding-right: 16px; }
+    }
+    @media (max-width: 600px) {
+      .article-title { font-size: 24px; }
+      .article-meta { gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="../index.html" class="nav-back">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      Portfolio
+    </a>
+    <div class="nav-sep"></div>
+    <span class="nav-title">When Every Dollar Counts: Rewriting Revenue From Source of Truth</span>
+    <div class="nav-actions">
+      <button class="theme-btn" id="themeToggle" aria-label="Toggle theme">
+        <svg id="sunIcon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path stroke-linecap="round" d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <svg id="moonIcon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="display:none"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <div class="page-wrapper">
+    <!-- TOC Sidebar -->
+    <aside class="toc-sidebar">
+      <div class="toc-label">On this page</div>
+      <ul class="toc-list" id="tocList">
+        <li><a href="#intro">Introduction</a></li>
+        <li><a href="#pipeline">The Revenue Pipeline</a></li>
+        <li><a href="#problem">The Problem</a></li>
+        <li class="toc-sub"><ul class="toc-list">
+          <li><a href="#edge-cases">Edge Cases Everywhere</a></li>
+          <li><a href="#brittle-code">Accumulated Patches</a></li>
+        </ul></li>
+        <li><a href="#investigation">Investigation</a></li>
+        <li class="toc-sub"><ul class="toc-list">
+          <li><a href="#tracing-discrepancy">Tracing the Discrepancy</a></li>
+          <li><a href="#root-cause">Root Causes</a></li>
+        </ul></li>
+        <li><a href="#fix">The Fix</a></li>
+        <li class="toc-sub"><ul class="toc-list">
+          <li><a href="#source-of-truth">Source of Truth Approach</a></li>
+          <li><a href="#implementation">Implementation</a></li>
+          <li><a href="#edge-case-handling">Edge Case Handling</a></li>
+        </ul></li>
+        <li><a href="#reconciliation">The Reconciliation Job</a></li>
+        <li class="toc-sub"><ul class="toc-list">
+          <li><a href="#design">Design</a></li>
+          <li><a href="#rejection">Why It Got Rejected</a></li>
+        </ul></li>
+        <li><a href="#results">Results</a></li>
+        <li><a href="#takeaways">Key Takeaways</a></li>
+        <li><a href="#timeline">Timeline</a></li>
+      </ul>
+    </aside>
+
+    <!-- Mobile TOC -->
+    <div style="display:none" id="mobileTocWrapper">
+      <button class="toc-mobile-toggle" id="mobileTocBtn">
+        On this page
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      <div class="toc-mobile-panel" id="mobileTocPanel">
+        <ul class="toc-list">
+          <li><a href="#intro">Introduction</a></li>
+          <li><a href="#pipeline">The Revenue Pipeline</a></li>
+          <li><a href="#problem">The Problem</a></li>
+          <li><a href="#investigation">Investigation</a></li>
+          <li><a href="#fix">The Fix</a></li>
+          <li><a href="#reconciliation">The Reconciliation Job</a></li>
+          <li><a href="#results">Results</a></li>
+          <li><a href="#takeaways">Key Takeaways</a></li>
+          <li><a href="#timeline">Timeline</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Article -->
+    <main class="article-main">
+      <div class="article-tags">
+        <span class="tag">Go</span>
+        <span class="tag">Shopify</span>
+        <span class="tag tag-orange">Financial Data</span>
+        <span class="tag tag-orange">Data Integrity</span>
+        <span class="tag tag-green">reportfns</span>
+        <span class="tag tag-green">Production Fix</span>
+      </div>
+
+      <h1 class="article-title">When Every Dollar Counts: Rewriting Revenue From Source of Truth</h1>
+      <p class="article-subtitle">How I fixed broken revenue calculations in TrueProfit's reportfns by abandoning incremental patches and recalculating from raw Shopify order data — and why a reconciliation job I built got rejected anyway</p>
+
+      <div class="article-meta">
+        <div class="meta-avatar">NN</div>
+        <div class="meta-info">
+          <div class="meta-author">Nghia Nguyen</div>
+          <div class="meta-details">Senior Software Engineer II · TrueProfit</div>
+        </div>
+        <div class="meta-reading">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2"/></svg>
+          13 min read · April 2026
+        </div>
+      </div>
+
+      <article class="prose">
+
+        <h2 id="intro">Introduction</h2>
+
+        <p>Revenue is the first number a merchant looks at. Everything else — profit, ROAS, LTV — flows from it. If revenue is wrong, the entire analytics product is wrong. Merchants are making ad spend decisions, inventory decisions, hiring decisions based on numbers they trust to be correct.</p>
+
+        <p>At TrueProfit, we build a Shopify analytics app. Our core product is helping merchants understand their true profit after ad spend, COGS, shipping, and refunds. The centerpiece is the <strong>revenue figure</strong> shown on the dashboard: gross revenue, net revenue after refunds, revenue by channel.</p>
+
+        <p>For months, that number was slightly off. Not wildly wrong — close enough that merchants didn't immediately notice. But off. A few percentage points here, a discrepancy on a specific day there. The kind of wrong that erodes trust slowly, until one day a merchant with a spreadsheet emails support asking why their Shopify admin shows $48,230 but TrueProfit shows $47,110.</p>
+
+        <p>This is the story of how I found it, fixed it, and what I learned about building systems that handle financial data.</p>
+
+        <hr />
+
+        <h2 id="pipeline">The Revenue Pipeline</h2>
+
+        <p>TrueProfit's revenue data flows through several layers. Shopify sends webhooks when orders are created, updated, or refunded. We process these in <code>reportfns</code> — serverless Lambda functions responsible for aggregating order data into daily/weekly/monthly report summaries stored in MongoDB.</p>
+
+        <div class="diagram-wrapper">
+          <div class="mermaid">
+flowchart LR
+    SW["Shopify\nWebhooks"]
+    SQ["SQS Queue\n(order events)"]
+    RF["reportfns\n(Lambda)"]
+    MG["MongoDB\n(report aggregates)"]
+    AP["API\n(dashboard)"]
+    MC["Merchant\nDashboard"]
+
+    SW -->|orders/create\norders/updated\nrefunds/create| SQ
+    SQ -->|batch consume| RF
+    RF -->|upsert daily\nreport docs| MG
+    MG -->|query| AP
+    AP -->|revenue,\nrefunds, net| MC
+          </div>
+          <div class="diagram-caption">Revenue data flow — from Shopify webhook to merchant dashboard</div>
+        </div>
+
+        <p>The <code>reportfns</code> Lambda receives order events and incrementally updates a daily report document. When an order comes in: add to gross revenue. When a refund arrives: subtract from revenue, add to refunds. When an order is edited: apply the delta.</p>
+
+        <p>Simple in theory. The problem is that Shopify's order model is surprisingly complex, and the real world doesn't send events in the clean sequence you'd expect.</p>
+
+        <hr />
+
+        <h2 id="problem">The Problem</h2>
+
+        <div class="incident-banner">
+          <div class="banner-icon">$</div>
+          <div>
+            <div class="banner-title">Revenue Discrepancy</div>
+            <div class="banner-body">Merchant-reported discrepancies between TrueProfit revenue and Shopify admin. Some days off by 3–8%. Partial refunds double-counted. Multi-currency orders converted at wrong rates. Revenue accuracy measured at ~94% across affected shops.</div>
+          </div>
+        </div>
+
+        <p>When we started investigating, the first thing we did was build a comparison tool: pull the last 30 days of orders directly from the Shopify Admin API for a set of test shops, calculate what revenue <em>should</em> be, and compare against what our database stored.</p>
+
+        <p>The results were uncomfortable. <strong>~6% of daily revenue figures were wrong</strong> — some over-counted, some under-counted. The errors weren't random noise. They clustered around specific patterns: shops with lots of refunds, shops using multi-currency, shops that frequently edit orders after creation.</p>
+
+        <h3 id="edge-cases">Edge Cases Everywhere</h3>
+
+        <p>Shopify's order model has more states than you'd think:</p>
+
+        <ul>
+          <li><strong>Partial refunds</strong> — a merchant refunds one line item out of five. Shopify fires a <code>refunds/create</code> event. But the refund object contains line item refunds, shipping refunds, and adjustments as separate fields. Easy to double-count or miss parts.</li>
+          <li><strong>Order edits</strong> — Shopify added <code>orders/edited</code> webhooks relatively recently. Older webhook handlers don't know about this event type and silently drop it. The order's total changes but your database doesn't.</li>
+          <li><strong>Multi-currency</strong> — Shopify presents prices in the shop's currency and the customer's currency. Refunds are issued in the customer's currency. If you convert at different times (order creation vs. refund creation), you get phantom currency gains/losses.</li>
+          <li><strong>Timezone mismatches</strong> — Shopify timestamps are UTC. Merchants think about revenue in their local timezone. An order at 11:30pm UTC is Tuesday in Vietnam but Wednesday in New York. If you bucket by Shopify's UTC date, you'll disagree with the merchant's Shopify admin view which shows local time.</li>
+          <li><strong>Test orders</strong> — Shopify marks some orders as test orders. They shouldn't count toward revenue. Easy to accidentally include them if you don't check the <code>test</code> field.</li>
+          <li><strong>Cancelled orders with refunds</strong> — if an order is cancelled and fully refunded, should it appear in revenue at all? Shopify says yes (gross revenue minus refunds = 0). Some merchants expect it to not appear at all.</li>
+        </ul>
+
+        <h3 id="brittle-code">Accumulated Patches</h3>
+
+        <p>The original <code>reportfns</code> code was written to handle the happy path: order comes in, add revenue. As edge cases were discovered over time, patches were applied on top. The result was something like this:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">reportfns/handler.go — BEFORE (accumulated patches)</span>
+          </div>
+          <pre><code class="language-go">func handleOrderEvent(ctx context.Context, event OrderEvent) error {
+    order := event.Order
+
+    // Original logic
+    revenue := order.TotalPrice
+
+    // Patch #1 (3 months later): subtract refunds
+    if order.TotalRefunded > 0 {
+        revenue -= order.TotalRefunded
+    }
+
+    // Patch #2 (5 months later): handle currency
+    // TODO: this is wrong for multi-currency, fix later
+    if order.Currency != shopCurrency {
+        revenue = convertCurrency(revenue, order.Currency, shopCurrency)
+    }
+
+    // Patch #3 (7 months later): someone noticed test orders
+    if order.Test {
+        return nil
+    }
+
+    // Patch #4 (8 months later): cancelled orders
+    if order.CancelledAt != nil && order.TotalRefunded >= order.TotalPrice {
+        // skip? or not? unclear...
+        // return nil
+    }
+
+    // Update the daily report
+    return upsertDailyReport(ctx, shopID, orderDate(order), revenue)
+}</code></pre>
+        </div>
+
+        <p>Notice the commented-out return, the <code>TODO</code> that never got fixed, the patch applied after the currency conversion that means test orders <em>after</em> the currency conversion are still excluded but test orders <em>before</em> aren't. This code had been touched by multiple engineers over 18 months. Nobody held a full mental model of what it actually did.</p>
+
+        <p>Worse: each patch was applied as an incremental delta handler. There was no mechanism to go back and recalculate old data when a bug was fixed. Every fix only applied going forward. Old reports stayed wrong.</p>
+
+        <hr />
+
+        <h2 id="investigation">Investigation</h2>
+
+        <h3 id="tracing-discrepancy">Tracing the Discrepancy</h3>
+
+        <p>I started by writing a diagnostic tool that compared our stored revenue against a freshly calculated figure for a given shop and date range. The approach:</p>
+
+        <ol>
+          <li>Fetch all orders for the shop directly from Shopify Admin API (paginated)</li>
+          <li>Apply our revenue calculation rules to those raw orders</li>
+          <li>Compare against what MongoDB stored</li>
+          <li>Log discrepancies with the specific order IDs involved</li>
+        </ol>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">tools/revenue_audit.go</span>
+          </div>
+          <pre><code class="language-go">type AuditResult struct {
+    ShopID       string
+    Date         time.Time
+    StoredRevenue  float64
+    ActualRevenue  float64
+    Delta          float64
+    DeltaPct       float64
+    DiscrepantOrders []string
+}
+
+func auditShopRevenue(ctx context.Context, shopID string, from, to time.Time) ([]AuditResult, error) {
+    // Fetch raw orders from Shopify (source of truth)
+    orders, err := shopifyClient.GetOrdersInRange(ctx, shopID, from, to)
+    if err != nil {
+        return nil, fmt.Errorf("fetch orders for %s: %w", shopID, err)
+    }
+
+    // Group by local date (using shop's timezone)
+    shop, _ := shopRepo.Get(ctx, shopID)
+    loc, _ := time.LoadLocation(shop.Timezone)
+
+    byDate := make(map[string][]ShopifyOrder)
+    for _, o := range orders {
+        localDate := o.CreatedAt.In(loc).Format("2006-01-02")
+        byDate[localDate] = append(byDate[localDate], o)
+    }
+
+    var results []AuditResult
+    for dateStr, dayOrders := range byDate {
+        actual := calculateRevenueFromOrders(dayOrders, shop)
+        stored, _ := reportRepo.GetDailyRevenue(ctx, shopID, dateStr)
+
+        delta := actual - stored
+        if math.Abs(delta) > 0.01 { // ignore float rounding < 1 cent
+            results = append(results, AuditResult{
+                ShopID:        shopID,
+                Date:          parseDate(dateStr),
+                StoredRevenue: stored,
+                ActualRevenue: actual,
+                Delta:         delta,
+                DeltaPct:      delta / actual * 100,
+            })
+        }
+    }
+    return results, nil
+}</code></pre>
+        </div>
+
+        <h3 id="root-cause">Root Causes</h3>
+
+        <p>Running the audit across 50 shops over 90 days surfaced four distinct root causes:</p>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Root Cause</th>
+                <th>Frequency</th>
+                <th>Impact</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Timezone bucketing (UTC vs. shop local time)</td>
+                <td>All shops</td>
+                <td>Revenue moved across day boundaries, net zero but days wrong</td>
+              </tr>
+              <tr>
+                <td>Partial refund double-counting</td>
+                <td>~40% of shops</td>
+                <td>Refunds subtracted twice when <code>refunds/create</code> event arrived after <code>orders/updated</code></td>
+              </tr>
+              <tr>
+                <td>Multi-currency conversion timing</td>
+                <td>~25% of shops</td>
+                <td>Order converted at creation rate, refund converted at different rate</td>
+              </tr>
+              <tr>
+                <td>Order edit events dropped</td>
+                <td>~15% of shops</td>
+                <td><code>orders/edited</code> webhook not registered; post-creation order changes lost</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>The timezone issue was the most pervasive. Every shop was affected, but in a way that averaged out over the month (orders shift between days, not disappear). The partial refund double-count was the most damaging in absolute dollar terms.</p>
+
+        <hr />
+
+        <h2 id="fix">The Fix</h2>
+
+        <h3 id="source-of-truth">The Source of Truth Approach</h3>
+
+        <p>The key insight was this: <strong>incremental event processing is the wrong model for financial data</strong>.</p>
+
+        <p>Incremental updates work fine when each event carries the full delta and events arrive in order and are never duplicated. Shopify's webhook delivery satisfies none of these properties. Webhooks can arrive out of order. They can be retried (duplicate delivery). A single order state change can generate multiple overlapping events. And there's no guaranteed ordering between <code>orders/updated</code> and <code>refunds/create</code> for the same refund.</p>
+
+        <p>The fix was to change the model entirely: instead of applying deltas, <strong>recalculate from the raw order state</strong>.</p>
+
+        <p>When any order event arrives for a shop on a given day, we don't try to figure out what changed. We:</p>
+        <ol>
+          <li>Fetch the current state of all orders for that shop on that day from Shopify</li>
+          <li>Calculate revenue from scratch using a pure function</li>
+          <li>Write the result, overwriting whatever was there before</li>
+        </ol>
+
+        <p>This is idempotent. It's safe to re-run. It handles out-of-order events naturally because we don't care about order — we care about the final state. And it will automatically correct any previous miscalculation.</p>
+
+        <div class="diagram-wrapper">
+          <div class="mermaid">
+flowchart TD
+    E["Order Event Arrives\n(create/update/refund/edit)"]
+    D["Extract shop_id + date\n(using shop timezone)"]
+    F["Fetch ALL orders for\nshop + date from Shopify API"]
+    C["calculateRevenue(orders)\npure function, no side effects"]
+    W["Write to MongoDB\n(upsert, idempotent)"]
+
+    E --> D --> F --> C --> W
+
+    style C fill:#1e293b,color:#f0f0f0,stroke:rgba(255,255,255,0.14)
+    style F fill:#1e293b,color:#f0f0f0,stroke:rgba(255,255,255,0.14)
+          </div>
+          <div class="diagram-caption">New approach: recalculate from source of truth on every event</div>
+        </div>
+
+        <h3 id="implementation">Implementation</h3>
+
+        <p>The core of the new implementation is a pure <code>calculateRevenue</code> function that takes a slice of Shopify orders and returns the revenue breakdown for that day. No database calls. No side effects. Easy to test.</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">reportfns/revenue.go — AFTER</span>
+          </div>
+          <pre><code class="language-go">// RevenueResult is the daily revenue breakdown calculated from raw orders.
+// All values are in the shop's currency.
+type RevenueResult struct {
+    GrossRevenue   float64
+    TotalRefunds   float64
+    NetRevenue     float64
+    OrderCount     int
+    RefundCount    int
+}
+
+// CalculateRevenue computes revenue from a slice of raw Shopify orders.
+// Pure function: no I/O, no side effects, safe to call multiple times.
+func CalculateRevenue(orders []ShopifyOrder, shopCurrency string) RevenueResult {
+    var result RevenueResult
+
+    for _, order := range orders {
+        // Skip test orders — they don't represent real revenue
+        if order.Test {
+            continue
+        }
+        // Skip orders that are fully cancelled AND fully refunded — they net to zero
+        // and pollute order counts without representing real business activity
+        if order.CancelledAt != nil && isFullyRefunded(order) {
+            continue
+        }
+
+        // Convert order total to shop currency at the exchange rate
+        // recorded at the time of order creation.
+        // CRITICAL: always use order.PresentmentCurrency + order.ExchangeRate
+        // never re-fetch current exchange rates — that introduces drift.
+        grossInShopCurrency := toShopCurrency(order.TotalPrice, order.PresentmentCurrency, order.ExchangeRate, shopCurrency)
+        result.GrossRevenue += grossInShopCurrency
+        result.OrderCount++
+
+        // Calculate refunds: sum all refund transactions
+        // DO NOT use order.TotalRefunded — it can be stale on webhook payloads.
+        // Walk order.Refunds[] directly.
+        for _, refund := range order.Refunds {
+            refundAmt := refundAmount(refund)
+            refundInShopCurrency := toShopCurrency(refundAmt, order.PresentmentCurrency, order.ExchangeRate, shopCurrency)
+            result.TotalRefunds += refundInShopCurrency
+            result.RefundCount++
+        }
+    }
+
+    result.NetRevenue = result.GrossRevenue - result.TotalRefunds
+    return result
+}
+
+// isFullyRefunded returns true if the order's refunds cover its entire price.
+func isFullyRefunded(order ShopifyOrder) bool {
+    var totalRefunded float64
+    for _, r := range order.Refunds {
+        totalRefunded += refundAmount(r)
+    }
+    // Use a small epsilon to handle float precision
+    return totalRefunded >= order.TotalPrice-0.01
+}
+
+// refundAmount returns the net amount refunded in an order's presentment currency.
+// It sums line item refunds + shipping refunds - restocking fees.
+func refundAmount(refund ShopifyRefund) float64 {
+    var total float64
+    for _, t := range refund.Transactions {
+        if t.Kind == "refund" && t.Status == "success" {
+            total += t.Amount
+        }
+    }
+    return total
+}</code></pre>
+        </div>
+
+        <p>The handler becomes much simpler. It doesn't need to understand what changed in the event — it just triggers a recalculation:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">reportfns/handler.go — AFTER</span>
+          </div>
+          <pre><code class="language-go">func handleOrderEvent(ctx context.Context, event OrderEvent) error {
+    shop, err := shopRepo.Get(ctx, event.ShopID)
+    if err != nil {
+        return fmt.Errorf("get shop %s: %w", event.ShopID, err)
+    }
+
+    // Determine the affected date in the shop's local timezone
+    loc, err := time.LoadLocation(shop.Timezone)
+    if err != nil {
+        return fmt.Errorf("load timezone %s: %w", shop.Timezone, err)
+    }
+    affectedDate := event.OccurredAt.In(loc).Truncate(24 * time.Hour)
+
+    // Fetch current order state from Shopify (source of truth)
+    orders, err := shopifyClient.GetOrdersForDate(ctx, event.ShopID, affectedDate, loc)
+    if err != nil {
+        return fmt.Errorf("fetch orders for %s on %s: %w", event.ShopID, affectedDate.Format("2006-01-02"), err)
+    }
+
+    // Calculate revenue from scratch — pure, idempotent
+    rev := CalculateRevenue(orders, shop.Currency)
+
+    // Upsert the daily report — overwrite, don't accumulate
+    return reportRepo.UpsertDailyRevenue(ctx, UpsertRevenueParams{
+        ShopID:       event.ShopID,
+        Date:         affectedDate,
+        GrossRevenue: rev.GrossRevenue,
+        TotalRefunds: rev.TotalRefunds,
+        NetRevenue:   rev.NetRevenue,
+        OrderCount:   rev.OrderCount,
+        RefundCount:  rev.RefundCount,
+        RecalcAt:     time.Now(),
+    })
+}</code></pre>
+        </div>
+
+        <p>Notice what's gone: no conditionals on event type, no delta logic, no <code>if order.Test</code> scattered around, no <code>TODO</code> comments. The handler is 30 lines. The complexity lives in <code>CalculateRevenue</code> which is a pure function with unit tests covering every edge case.</p>
+
+        <h3 id="edge-case-handling">Edge Case Handling</h3>
+
+        <p>Because we now have a pure function with full control over the calculation, edge cases become explicit and testable:</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">reportfns/revenue_test.go — table-driven tests</span>
+          </div>
+          <pre><code class="language-go">func TestCalculateRevenue(t *testing.T) {
+    tests := []struct {
+        name     string
+        orders   []ShopifyOrder
+        currency string
+        want     RevenueResult
+    }{
+        {
+            name: "simple order, no refunds",
+            orders: []ShopifyOrder{
+                {TotalPrice: 100.0, PresentmentCurrency: "USD", ExchangeRate: 1.0},
+            },
+            currency: "USD",
+            want: RevenueResult{GrossRevenue: 100.0, NetRevenue: 100.0, OrderCount: 1},
+        },
+        {
+            name: "partial refund — only refunded transactions, not order.TotalRefunded",
+            orders: []ShopifyOrder{
+                {
+                    TotalPrice:          100.0,
+                    PresentmentCurrency: "USD",
+                    ExchangeRate:        1.0,
+                    Refunds: []ShopifyRefund{{
+                        Transactions: []RefundTransaction{
+                            {Kind: "refund", Status: "success", Amount: 30.0},
+                        },
+                    }},
+                },
+            },
+            currency: "USD",
+            want: RevenueResult{GrossRevenue: 100.0, TotalRefunds: 30.0, NetRevenue: 70.0, OrderCount: 1, RefundCount: 1},
+        },
+        {
+            name: "test order — excluded from revenue",
+            orders: []ShopifyOrder{
+                {TotalPrice: 200.0, Test: true},
+            },
+            currency: "USD",
+            want:     RevenueResult{},
+        },
+        {
+            name: "fully cancelled and refunded — excluded",
+            orders: []ShopifyOrder{
+                {
+                    TotalPrice:   50.0,
+                    CancelledAt:  ptr(time.Now()),
+                    Refunds: []ShopifyRefund{{
+                        Transactions: []RefundTransaction{
+                            {Kind: "refund", Status: "success", Amount: 50.0},
+                        },
+                    }},
+                },
+            },
+            currency: "USD",
+            want:     RevenueResult{},
+        },
+        {
+            name: "multi-currency: USD order in EUR shop",
+            orders: []ShopifyOrder{
+                {
+                    TotalPrice:          100.0,
+                    PresentmentCurrency: "USD",
+                    ExchangeRate:        0.92, // 1 USD = 0.92 EUR at order time
+                },
+            },
+            currency: "EUR",
+            want: RevenueResult{GrossRevenue: 92.0, NetRevenue: 92.0, OrderCount: 1},
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got := CalculateRevenue(tt.orders, tt.currency)
+            if !almostEqual(got.GrossRevenue, tt.want.GrossRevenue) {
+                t.Errorf("GrossRevenue: got %.2f, want %.2f", got.GrossRevenue, tt.want.GrossRevenue)
+            }
+            // ... other field checks
+        })
+    }
+}</code></pre>
+        </div>
+
+        <p>These tests are the real value. Before the rewrite, there were <em>zero</em> unit tests for revenue calculation. Now there are 23 test cases covering every edge case we found in production.</p>
+
+        <hr />
+
+        <h2 id="reconciliation">The Reconciliation Job</h2>
+
+        <h3 id="design">Design</h3>
+
+        <p>After the fix was deployed and the numbers started looking correct, I wanted a safety net. A recurring job that would proactively compare our stored revenue against Shopify's numbers and alert if drift appeared.</p>
+
+        <p>The design was straightforward: a daily Lambda that runs on a cron, picks a sample of active shops, fetches their last 7 days of orders from Shopify, recalculates revenue, and compares against our database. Any discrepancy above 0.1% triggers a Slack alert with the shop ID and affected dates.</p>
+
+        <div class="code-block">
+          <div class="code-label">
+            <div class="code-dot code-dot-r"></div>
+            <div class="code-dot code-dot-y"></div>
+            <div class="code-dot code-dot-g"></div>
+            <span class="code-filename">reconciliation/job.go</span>
+          </div>
+          <pre><code class="language-go">type ReconciliationJob struct {
+    shopRepo     ShopRepository
+    reportRepo   ReportRepository
+    shopifyClient ShopifyClient
+    alerter      Alerter
+}
+
+func (j *ReconciliationJob) Run(ctx context.Context) error {
+    // Sample 5% of active shops per run — full scan is too expensive
+    shops, err := j.shopRepo.GetActiveSample(ctx, 0.05)
+    if err != nil {
+        return fmt.Errorf("sample active shops: %w", err)
+    }
+
+    var alerts []DiscrepancyAlert
+    for _, shop := range shops {
+        discrepancies, err := j.checkShop(ctx, shop, 7) // last 7 days
+        if err != nil {
+            // Log but don't fail the whole job — one shop's error shouldn't block others
+            log.Error("reconciliation check failed", "shop_id", shop.ID, "err", err)
+            continue
+        }
+        alerts = append(alerts, discrepancies...)
+    }
+
+    if len(alerts) > 0 {
+        return j.alerter.Send(ctx, alerts)
+    }
+    return nil
+}
+
+func (j *ReconciliationJob) checkShop(ctx context.Context, shop Shop, days int) ([]DiscrepancyAlert, error) {
+    loc, _ := time.LoadLocation(shop.Timezone)
+    now := time.Now().In(loc)
+
+    var alerts []DiscrepancyAlert
+    for d := 0; d < days; d++ {
+        date := now.AddDate(0, 0, -d).Truncate(24 * time.Hour)
+
+        orders, err := j.shopifyClient.GetOrdersForDate(ctx, shop.ID, date, loc)
+        if err != nil {
+            return nil, fmt.Errorf("fetch orders for day -%d: %w", d, err)
+        }
+
+        actual := CalculateRevenue(orders, shop.Currency)
+        stored, err := j.reportRepo.GetDailyRevenue(ctx, shop.ID, date)
+        if err != nil {
+            return nil, fmt.Errorf("get stored revenue: %w", err)
+        }
+
+        if discrepancyPct(actual.NetRevenue, stored.NetRevenue) > 0.001 {
+            alerts = append(alerts, DiscrepancyAlert{
+                ShopID:   shop.ID,
+                Date:     date,
+                Actual:   actual.NetRevenue,
+                Stored:   stored.NetRevenue,
+                DeltaPct: discrepancyPct(actual.NetRevenue, stored.NetRevenue),
+            })
+        }
+    }
+    return alerts, nil
+}</code></pre>
+        </div>
+
+        <h3 id="rejection">Why It Got Rejected</h3>
+
+        <p>I was fairly proud of this. Clean code, proper sampling, alerting on drift. I opened the PR and waited for approval.</p>
+
+        <p>The feedback was not what I expected.</p>
+
+        <div class="warning-banner">
+          <div class="banner-icon">!</div>
+          <div>
+            <div class="banner-title">Code Review Feedback</div>
+            <div class="banner-body">The reconciliation job was rejected — not because the code was wrong, but because of operational trade-offs the team wasn't willing to accept.</div>
+          </div>
+        </div>
+
+        <p>The concerns raised in review:</p>
+
+        <ul>
+          <li><strong>Shopify API cost</strong> — fetching orders for 5% of shops every day means thousands of Shopify API calls daily. Shopify's REST API has per-shop rate limits (40 req/s on standard plan, 2 req/s on basic). For shops with large order volumes, fetching 7 days of orders could exhaust their rate limit budget and impact the real-time webhook processing path.</li>
+          <li><strong>Database read amplification</strong> — the reconciliation job queries both Shopify and MongoDB for each shop-day combination. At our scale, this adds significant read load to MongoDB at a time we were already discussing sharding.</li>
+          <li><strong>False positive fatigue</strong> — the reviewer pointed out that minor discrepancies could arise from valid timing windows: an order at 11:59pm that arrives in our queue at 12:01am. The 0.1% threshold might generate noisy alerts that the team would start ignoring.</li>
+          <li><strong>Maintenance burden</strong> — another Lambda to deploy, monitor, and debug. The team's philosophy was "the fix should make the safety net unnecessary, not add infrastructure to paper over the fix."</li>
+        </ul>
+
+        <p>Honestly? These were fair points. I pushed back on the rate limit concern — we could throttle the job to run over 6 hours instead of all at once, respecting per-shop limits. But the broader argument — that a well-implemented idempotent recalculation from source of truth shouldn't need an external verifier — was harder to argue against.</p>
+
+        <p>The core fix was solid. The revenue numbers were now correct. The reconciliation job would have been a nice safety net, but it added complexity that the team judged wasn't worth the cost given that the root causes were addressed.</p>
+
+        <p>I closed the PR. I still think a lightweight version of that job would be valuable — maybe sampling 1% of shops, running weekly, with higher alert thresholds. But that's a conversation for after the fix has run stable for a few months. Right now, the numbers are right. That's what matters.</p>
+
+        <hr />
+
+        <h2 id="results">Results</h2>
+
+        <p>After deploying the source-of-truth rewrite and running the audit tool across all shops to backfill corrected figures:</p>
+
+        <div class="table-wrapper">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Before</th>
+                <th>After</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Revenue accuracy (vs. Shopify admin)</td>
+                <td>~94%</td>
+                <td>100%*</td>
+              </tr>
+              <tr>
+                <td>Days with discrepancy &gt;0.1%</td>
+                <td>~6% of shop-days</td>
+                <td>&lt;0.03% (float precision)</td>
+              </tr>
+              <tr>
+                <td>Partial refund double-counting</td>
+                <td>Affected 40% of shops</td>
+                <td>Eliminated</td>
+              </tr>
+              <tr>
+                <td>Multi-currency drift</td>
+                <td>Unpredictable</td>
+                <td>Zero (fixed-rate at order time)</td>
+              </tr>
+              <tr>
+                <td>Order edit events handled</td>
+                <td>No</td>
+                <td>Yes (recalc on any event)</td>
+              </tr>
+              <tr>
+                <td>Unit test coverage on revenue calc</td>
+                <td>0 tests</td>
+                <td>23 test cases</td>
+              </tr>
+              <tr>
+                <td>Code complexity (revenue handler)</td>
+                <td>~120 LOC, 6 patches</td>
+                <td>30 LOC handler + pure function</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p style="font-size:13px;color:var(--text-dim);margin-top:4px;">*100% accuracy assumes Shopify webhooks are delivered correctly and MongoDB is consistent. The calculation itself is deterministic — given the same input data, it always produces the correct result. If a webhook is missed or the DB has stale data, that's an infrastructure problem, not a calculation problem.</p>
+
+        <p>The merchant support tickets about revenue discrepancies dropped to zero within two weeks of the fix. That's the real signal.</p>
+
+        <hr />
+
+        <h2 id="takeaways">Key Takeaways</h2>
+
+        <div class="takeaways-grid">
+          <div class="takeaway-card">
+            <div class="takeaway-num">01</div>
+            <div class="takeaway-content">
+              <strong>Financial data must recalculate from source of truth</strong>
+              <p>Incremental delta-based updates are fragile for financial data. Out-of-order events, duplicates, and state mutations break delta logic in ways that are hard to detect and impossible to backfill. Recalculate from the authoritative source whenever anything changes.</p>
+            </div>
+          </div>
+          <div class="takeaway-card">
+            <div class="takeaway-num">02</div>
+            <div class="takeaway-content">
+              <strong>Idempotency is more valuable than efficiency for correctness-critical paths</strong>
+              <p>Yes, fetching all orders for a day on every event is more expensive than applying a delta. But it's safe to retry, safe to run twice, and automatically self-corrects. The cost difference is small. The correctness difference is everything.</p>
+            </div>
+          </div>
+          <div class="takeaway-card">
+            <div class="takeaway-num">03</div>
+            <div class="takeaway-content">
+              <strong>Pure functions for financial calculations</strong>
+              <p>A pure function with no I/O is the only way to confidently unit test financial logic. If your revenue calculation has database calls embedded in it, you can't test edge cases without mocking half your infrastructure. Extract the math into a pure function first.</p>
+            </div>
+          </div>
+          <div class="takeaway-card">
+            <div class="takeaway-num">04</div>
+            <div class="takeaway-content">
+              <strong>Timezone handling is never trivial</strong>
+              <p>UTC timestamps and merchant local time diverge at day boundaries. Always convert to the shop's timezone before bucketing into report periods. Never assume UTC. This is the most common and most silent revenue bucketing bug.</p>
+            </div>
+          </div>
+          <div class="takeaway-card">
+            <div class="takeaway-num">05</div>
+            <div class="takeaway-content">
+              <strong>Don't trust webhook payload fields for financial totals</strong>
+              <p>Shopify's <code>order.TotalRefunded</code> can be stale on webhook payloads — it reflects the state at webhook delivery time, not the true current state. Walk the <code>order.Refunds[]</code> array and sum transactions yourself. Same applies to <code>order.TotalPrice</code> after an order edit.</p>
+            </div>
+          </div>
+          <div class="takeaway-card">
+            <div class="takeaway-num">06</div>
+            <div class="takeaway-content">
+              <strong>Fix old data, don't just fix going forward</strong>
+              <p>A bug fix that only applies to new events leaves months of wrong data in the database. Build the backfill into the fix from day one. Our audit tool became the backfill tool — same calculation logic, run against historical data.</p>
+            </div>
+          </div>
+          <div class="takeaway-card">
+            <div class="takeaway-num">07</div>
+            <div class="takeaway-content">
+              <strong>Sometimes the right engineering decision gets rejected — and that's OK</strong>
+              <p>The reconciliation job was solid engineering. It got rejected for legitimate operational reasons. I defended it with data, the team made a call, and we moved on. Not every good idea makes it to production. What matters is that the core problem was solved correctly.</p>
+            </div>
+          </div>
+        </div>
+
+        <hr />
+
+        <h2 id="timeline">Timeline</h2>
+
+        <div class="timeline">
+          <div class="tl-item">
+            <div class="tl-dot phase-1"></div>
+            <div class="tl-date">Week 1</div>
+            <div class="tl-event">Revenue discrepancies reported by merchants.</div>
+            <div class="tl-impact">Support tickets: "TrueProfit shows different revenue than Shopify admin." Investigation begins.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-1"></div>
+            <div class="tl-date">Week 1–2</div>
+            <div class="tl-event">Audit tool built and run across 50 shops.</div>
+            <div class="tl-impact">~6% of shop-days show discrepancy &gt;0.1%. Four root causes identified: timezone bucketing, partial refund double-counting, multi-currency drift, dropped order edits.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot neutral"></div>
+            <div class="tl-date">Week 2</div>
+            <div class="tl-event">Decision: patch vs. rewrite.</div>
+            <div class="tl-impact">Team discussion. Decided to rewrite the revenue handler around source-of-truth recalculation rather than adding more patches. Estimated 1 week of work.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-2"></div>
+            <div class="tl-date">Week 3</div>
+            <div class="tl-event">Rewrite implemented and tested.</div>
+            <div class="tl-impact">Pure <code>CalculateRevenue</code> function written with 23 unit tests. New handler: 30 LOC. All four root causes handled.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-2"></div>
+            <div class="tl-date">Week 3</div>
+            <div class="tl-event">Deployed to production + historical backfill.</div>
+            <div class="tl-impact">Audit tool repurposed to backfill 90 days of corrected revenue data across all shops. Revenue accuracy: ~94% → 100% (given correct webhook delivery &amp; DB consistency).</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot neutral"></div>
+            <div class="tl-date">Week 4</div>
+            <div class="tl-event">Reconciliation job PR opened.</div>
+            <div class="tl-impact">Proactive drift detection via daily sampling of 5% of active shops. Clean implementation.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-1"></div>
+            <div class="tl-date">Week 4</div>
+            <div class="tl-event">Reconciliation job rejected in review.</div>
+            <div class="tl-impact">API cost, DB read amplification, false positive risk, and maintenance burden. Team verdict: the fix itself should be the guarantee. PR closed.</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot phase-3"></div>
+            <div class="tl-date">Week 6+</div>
+            <div class="tl-event">Zero merchant revenue discrepancy tickets.</div>
+            <div class="tl-impact">Revenue numbers stable. Trust rebuilt. System running correctly on idempotent source-of-truth recalculation.</div>
+          </div>
+        </div>
+
+      </article>
+
+      <!-- Footer -->
+      <footer class="article-footer">
+        <div class="author-card">
+          <div class="author-avatar">NN</div>
+          <div>
+            <div class="author-name">Nghia Nguyen</div>
+            <div class="author-role">Senior Software Engineer II · TrueProfit</div>
+            <div class="author-bio">I build distributed systems that process e-commerce data at scale. I write about Go, data integrity, financial systems, and the production incidents that teach you things no book does. <a href="../index.html" class="author-link">More writing and projects →</a></div>
+          </div>
+        </div>
+
+        <div class="footer-tags">
+          <a href="#" class="footer-tag">Go</a>
+          <a href="#" class="footer-tag">Shopify</a>
+          <a href="#" class="footer-tag">Financial Data</a>
+          <a href="#" class="footer-tag">Data Integrity</a>
+          <a href="#" class="footer-tag">Lambda</a>
+          <a href="#" class="footer-tag">reportfns</a>
+          <a href="#" class="footer-tag">Idempotency</a>
+          <a href="#" class="footer-tag">Source of Truth</a>
+        </div>
+
+        <div class="share-row">
+          <span class="share-label">Share</span>
+          <a class="share-btn" href="https://twitter.com/intent/tweet?text=When%20Every%20Dollar%20Counts%3A%20Rewriting%20Revenue%20From%20Source%20of%20Truth&url=https://nghia-nguyen.dev/blog/revenue-reconciliation-fix.html" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            X / Twitter
+          </a>
+          <a class="share-btn" href="https://www.linkedin.com/sharing/share-offsite/?url=https://nghia-nguyen.dev/blog/revenue-reconciliation-fix.html" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+            LinkedIn
+          </a>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    // Theme toggle
+    const html = document.documentElement;
+    const btn = document.getElementById('themeToggle');
+    const sun = document.getElementById('sunIcon');
+    const moon = document.getElementById('moonIcon');
+
+    function applyTheme(theme) {
+      html.setAttribute('data-theme', theme);
+      sun.style.display = theme === 'dark' ? 'block' : 'none';
+      moon.style.display = theme === 'light' ? 'block' : 'none';
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: theme === 'dark' ? 'dark' : 'default',
+        themeVariables: theme === 'dark' ? {
+          background: '#111111',
+          primaryColor: '#1e293b',
+          primaryTextColor: '#f0f0f0',
+          primaryBorderColor: 'rgba(255,255,255,0.14)',
+          lineColor: '#555',
+          secondaryColor: '#181818',
+          tertiaryColor: '#1e1e1e',
+          edgeLabelBackground: '#111111',
+          clusterBkg: '#181818',
+          titleColor: '#f0f0f0',
+          nodeBorder: 'rgba(255,255,255,0.14)',
+        } : {
+          background: '#f2f2f2',
+          primaryColor: '#e0e7ff',
+          primaryTextColor: '#0f0f0f',
+        }
+      });
+      document.querySelectorAll('.mermaid').forEach(el => {
+        const src = el.getAttribute('data-src') || el.textContent;
+        if (!el.getAttribute('data-src')) el.setAttribute('data-src', src);
+        el.removeAttribute('data-processed');
+        el.textContent = src;
+      });
+      mermaid.run({ querySelector: '.mermaid' });
+    }
+
+    btn.addEventListener('click', () => {
+      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', next);
+      applyTheme(next);
+    });
+
+    const saved = localStorage.getItem('theme') || 'dark';
+    applyTheme(saved);
+
+    // Mobile TOC
+    const wrapper = document.getElementById('mobileTocWrapper');
+    const toggleBtn = document.getElementById('mobileTocBtn');
+    const panel = document.getElementById('mobileTocPanel');
+
+    if (window.innerWidth <= 900) {
+      wrapper.style.display = 'block';
+    }
+    window.addEventListener('resize', () => {
+      wrapper.style.display = window.innerWidth <= 900 ? 'block' : 'none';
+    });
+    toggleBtn.addEventListener('click', () => {
+      toggleBtn.classList.toggle('open');
+      panel.classList.toggle('open');
+    });
+
+    // Active TOC on scroll
+    const headings = document.querySelectorAll('.prose h2[id], .prose h3[id]');
+    const tocLinks = document.querySelectorAll('.toc-list a');
+
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          tocLinks.forEach(a => a.classList.remove('active'));
+          const active = document.querySelector(`.toc-list a[href="#${entry.target.id}"]`);
+          if (active) active.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-80px 0px -60% 0px', threshold: 0 });
+
+    headings.forEach(h => observer.observe(h));
+  </script>
+</body>
+</html>
