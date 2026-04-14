@@ -1002,6 +1002,15 @@
       justify-content: flex-end;
     }
 
+    .form-status {
+      min-height: 1.2rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .form-status[data-tone="success"] { color: #22c55e; }
+    .form-status[data-tone="error"] { color: #ef4444; }
+
     /* ─── Footer ─── */
     footer {
       position: relative;
@@ -1661,11 +1670,8 @@
         </div>
 
         <div class="fade-up fade-up-d2">
-          <form class="contact-form" action="https://formsubmit.co/ngocnghia128@gmail.com" method="POST" id="contactForm">
-            <input type="hidden" name="_subject" value="New contact from Portfolio" />
-            <input type="hidden" name="_captcha" value="false" />
-            <input type="hidden" name="_next" value="https://nghiack7.github.io/nghia-nguyen/#contact" />
-            <input type="text" name="_honey" style="display:none" />
+          <form class="contact-form" action="/api/contact" method="POST" id="contactForm">
+            <input type="text" name="company" autocomplete="off" tabindex="-1" style="position:absolute;left:-9999px;opacity:0;" />
             <div class="form-row">
               <div class="form-field">
                 <label for="name">Name</label>
@@ -1690,6 +1696,7 @@
                 Send Message
               </button>
             </div>
+            <p class="form-status" id="contactStatus" aria-live="polite"></p>
           </form>
         </div>
 
@@ -1837,42 +1844,8 @@
 
     sections.forEach(s => navObserver.observe(s));
 
-    // ─── Contact Form (FormSubmit.co) ───
-    const contactForm = document.getElementById('contactForm');
-    contactForm.addEventListener('submit', async function(e) {
-      e.preventDefault();
-      const btn = document.getElementById('submitBtn');
-      btn.innerHTML = 'Sending...';
-      btn.disabled = true;
-      try {
-        const res = await fetch(this.action, {
-          method: 'POST',
-          body: new FormData(this),
-          headers: { 'Accept': 'application/json' }
-        });
-        if (res.ok) {
-          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Sent!';
-          btn.style.background = '#22c55e';
-          this.reset();
-          setTimeout(() => {
-            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send Message';
-            btn.style.background = '';
-            btn.disabled = false;
-          }, 3000);
-        } else {
-          throw new Error('Failed');
-        }
-      } catch {
-        btn.innerHTML = 'Failed — try email directly';
-        btn.style.background = '#ef4444';
-        btn.disabled = false;
-        setTimeout(() => {
-          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send Message';
-          btn.style.background = '';
-        }, 3000);
-      }
-    });
   </script>
+  <script type="module" src="assets/contact-form.js"></script>
 
 </body>
 </html>

@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "nghia-nguyen-site",
+  "compatibility_date": "2026-04-13",
+  "pages_build_output_dir": "./dist",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nghia-nguyen-site",
+      "database_id": "5e69fab8-d27e-4fe1-985a-9a32f497a472"
+    }
+  ]
+}

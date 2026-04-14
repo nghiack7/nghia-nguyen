@@ -1,0 +1,13 @@
+{
+  "name": "nghia-nguyen-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./scripts/build-static.mjs",
+    "deploy": "npm run build && wrangler pages deploy dist",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "wrangler": "^4.81.1"
+  }
+}

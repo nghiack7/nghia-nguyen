@@ -481,11 +481,198 @@
     .share-btn:hover { background: var(--bg-4); color: var(--text); border-color: var(--border-strong); }
     .share-btn svg { width: 14px; height: 14px; }
 
+    .engagement-shell {
+      display: grid;
+      gap: 18px;
+      padding: 22px;
+      margin-bottom: 32px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .engagement-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .engagement-stat {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+    }
+    .engagement-kicker {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+    .engagement-value {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+    .engagement-sub {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .rating-row, .comment-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .rating-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .rating-btn {
+      min-width: 44px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg-3);
+      color: var(--text-muted);
+      font: inherit;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+    .rating-btn:hover,
+    .rating-btn.active {
+      border-color: rgba(59,130,246,0.35);
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .status-line {
+      min-height: 1.2rem;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .status-line[data-tone="success"] { color: var(--green); }
+    .status-line[data-tone="error"] { color: var(--red); }
+    .comment-form {
+      display: grid;
+      gap: 12px;
+    }
+    .comment-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .field label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+    .field input,
+    .field textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-3);
+      color: var(--text);
+      font: inherit;
+      outline: none;
+    }
+    .field input:focus,
+    .field textarea:focus {
+      border-color: rgba(59,130,246,0.4);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    }
+    .field textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    .comment-consent {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .comment-submit {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .comment-submit button {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(59,130,246,0.25);
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .comment-submit button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    .comment-list {
+      display: grid;
+      gap: 12px;
+    }
+    .comment-item {
+      padding: 14px 16px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .comment-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .comment-author {
+      font-size: 14px;
+      color: var(--text);
+    }
+    .comment-meta {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .comment-body {
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text-muted);
+    }
+    .comment-empty {
+      font-size: 13px;
+      color: var(--text-muted);
+      padding: 14px 16px;
+      border-radius: var(--radius-sm);
+      border: 1px dashed var(--border-strong);
+      background: var(--bg-3);
+    }
+
     /* Responsive */
     @media (max-width: 900px) {
       .toc-sidebar { display: none; }
       .toc-mobile-toggle { display: flex; }
       .page-wrapper { gap: 0; padding-left: 16px; padding-right: 16px; }
+      .engagement-summary,
+      .comment-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 600px) {
       .article-title { font-size: 24px; }
@@ -1391,6 +1578,77 @@ func (j *ReconciliationJob) checkShop(ctx context.Context, shop Shop, days int) 
 
       <!-- Footer -->
       <footer class="article-footer">
+        <section class="engagement-shell" data-article-slug="revenue-reconciliation-fix">
+          <div class="engagement-summary">
+            <div class="engagement-stat">
+              <span class="engagement-kicker">Views</span>
+              <div class="engagement-value" data-view-count>0</div>
+              <div class="engagement-sub">Unique views are deduped per visitor per day.</div>
+            </div>
+            <div class="engagement-stat">
+              <span class="engagement-kicker">Rating</span>
+              <div class="engagement-value" data-rating-average>No ratings</div>
+              <div class="engagement-sub" data-rating-count>0 ratings</div>
+            </div>
+            <div class="engagement-stat">
+              <span class="engagement-kicker">Comments</span>
+              <div class="engagement-value" data-comment-count>0 comments</div>
+              <div class="engagement-sub">Public comments only. No copied “trust” filler.</div>
+            </div>
+          </div>
+
+          <div class="rating-row">
+            <div>
+              <div class="engagement-kicker">Rate this article</div>
+              <p class="engagement-sub">One rating per visitor. Re-rating updates your previous score.</p>
+            </div>
+            <div class="rating-buttons" aria-label="Rate this article from 1 to 5">
+              <button type="button" class="rating-btn" data-rating-value="1">1 &#9733;</button>
+              <button type="button" class="rating-btn" data-rating-value="2">2 &#9733;</button>
+              <button type="button" class="rating-btn" data-rating-value="3">3 &#9733;</button>
+              <button type="button" class="rating-btn" data-rating-value="4">4 &#9733;</button>
+              <button type="button" class="rating-btn" data-rating-value="5">5 &#9733;</button>
+            </div>
+          </div>
+          <p class="status-line" data-rating-status aria-live="polite"></p>
+
+          <div class="comment-header">
+            <div>
+              <div class="engagement-kicker">Join the discussion</div>
+              <p class="engagement-sub">Comments publish directly when they pass basic spam checks.</p>
+            </div>
+          </div>
+
+          <form class="comment-form" data-comment-form>
+            <input type="text" name="website" autocomplete="off" tabindex="-1" style="position:absolute;left:-9999px;opacity:0;" />
+            <div class="comment-grid">
+              <div class="field">
+                <label for="revenue-comment-name">Name</label>
+                <input id="revenue-comment-name" type="text" name="authorName" placeholder="Your name" required />
+              </div>
+              <div class="field">
+                <label for="revenue-comment-role">Role</label>
+                <input id="revenue-comment-role" type="text" name="authorRole" placeholder="Staff Engineer, Founder, ..." />
+              </div>
+            </div>
+            <div class="field">
+              <label for="revenue-comment-body">Comment</label>
+              <textarea id="revenue-comment-body" name="body" placeholder="What was useful, missing, or worth challenging?" required></textarea>
+            </div>
+            <label class="comment-consent">
+              <input type="checkbox" name="consent" required />
+              <span>I understand this comment will be public on the article page.</span>
+            </label>
+            <div class="comment-submit">
+              <button type="submit">Post comment</button>
+              <p class="status-line" data-comment-status aria-live="polite"></p>
+            </div>
+          </form>
+
+          <div class="comment-list" data-comment-list></div>
+          <p class="comment-empty" data-comment-empty>No public comments yet. Be the first reader to add signal, not fluff.</p>
+        </section>
+
         <div class="author-card">
           <div class="author-avatar">NN</div>
           <div>
@@ -1508,5 +1766,6 @@ func (j *ReconciliationJob) checkShop(ctx context.Context, shop Shop, days int) 
 
     headings.forEach(h => observer.observe(h));
   </script>
+  <script type="module" src="../assets/article-engagement.js"></script>
 </body>
 </html>
