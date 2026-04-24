@@ -56,7 +56,11 @@ async function getJson(path, params = {}) {
     }
   });
 
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      "x-visitor-token": getOrCreateVisitorToken()
+    }
+  });
   return parseResponse(response);
 }
 

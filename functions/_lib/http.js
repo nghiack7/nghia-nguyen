@@ -45,6 +45,17 @@ function getVisitorToken(request, payload = {}) {
   return token;
 }
 
+function getOptionalVisitorToken(request) {
+  const token = String(request.headers.get("x-visitor-token") || "").trim();
+  if (!token) {
+    return null;
+  }
+  if (token.length < 12 || token.length > 128) {
+    return null;
+  }
+  return token;
+}
+
 function getClientIp(request) {
   return request.headers.get("CF-Connecting-IP") || "0.0.0.0";
 }
@@ -53,4 +64,4 @@ function getUserAgent(request) {
   return request.headers.get("user-agent") || "unknown";
 }
 
-export { getClientIp, getUserAgent, getVisitorToken, json, jsonError, readJson, sha256Hex };
+export { getClientIp, getOptionalVisitorToken, getUserAgent, getVisitorToken, json, jsonError, readJson, sha256Hex };

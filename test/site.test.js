@@ -2,12 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  SITE_PROFILE_KEY,
   SUPPORTED_ARTICLES,
   buildArticleStatsPayload,
+  buildSiteStatsPayload,
   normalizeRating,
   validateArticleCommentInput,
   validateContactInput
 } from "../functions/_lib/engagement.js";
+import { isGithubStarCacheStale } from "../functions/_lib/db.js";
+import { fetchGithubStarCount } from "../functions/_lib/github.js";
 
 test("SUPPORTED_ARTICLES exposes expected slugs", () => {
   assert.deepEqual(
@@ -123,4 +127,87 @@ test("buildArticleStatsPayload derives averages and UI-friendly counts", () => {
       ]
     }
   );
+});
+
+test("buildSiteStatsPayload normalizes nullable GitHub stars and like state", () => {
+  assert.deepEqual(
+    buildSiteStatsPayload({
+      metrics: {
+        viewCount: "12",
+        likeCount: "4",
+        githubStarCount: null,
+        githubStarsCheckedAt: null
+      },
+      likedByVisitor: true
+    }),
+    {
+      key: SITE_PROFILE_KEY,
+      viewCount: 12,
+      likeCount: 4,
+      githubStarCount: null,
+      githubStarsCheckedAt: null,
+      likedByVisitor: true
+    }
+  );
+});
+
+test("isGithubStarCacheStale refreshes missing and old GitHub star data", () => {
+  const now = new Date("2026-04-23T12:00:00.000Z");
+
+  assert.equal(isGithubStarCacheStale({ githubStarCount: null }, now), true);
+  assert.equal(
+    isGithubStarCacheStale(
+      {
+        githubStarCount: null,
+        githubStarsCheckedAt: "2026-04-23T07:00:00.000Z"
+      },
+      now
+    ),
+    false
+  );
+  assert.equal(
+    isGithubStarCacheStale(
+      {
+        githubStarCount: 10,
+        githubStarsCheckedAt: "2026-04-23T07:00:00.000Z"
+      },
+      now
+    ),
+    false
+  );
+  assert.equal(
+    isGithubStarCacheStale(
+      {
+        githubStarCount: 10,
+        githubStarsCheckedAt: "2026-04-23T05:00:00.000Z"
+      },
+      now
+    ),
+    true
+  );
+});
+
+test("fetchGithubStarCount sums paginated repository stars", async () => {
+  const calls = [];
+  const total = await fetchGithubStarCount(async (url) => {
+    calls.push(url);
+    const page = new URL(url).searchParams.get("page");
+
+    if (page === "1") {
+      return Response.json(
+        Array.from({ length: 100 }, (_, index) => ({
+          stargazers_count: index === 0 ? 3 : 0
+        }))
+      );
+    }
+
+    return Response.json([
+      {
+        stargazers_count: 7
+      }
+    ]);
+  });
+
+  assert.equal(total, 10);
+  assert.equal(calls.length, 2);
 });

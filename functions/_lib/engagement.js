@@ -7,6 +7,7 @@ const SUPPORTED_ARTICLES = {
   }
 };
 
+const SITE_PROFILE_KEY = "portfolio";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function normalizeWhitespace(value) {
@@ -115,9 +116,25 @@ function buildArticleStatsPayload({ slug, metrics = {}, comments = [] }) {
   };
 }
 
+function buildSiteStatsPayload({ metrics = {}, likedByVisitor = false }) {
+  return {
+    key: SITE_PROFILE_KEY,
+    viewCount: Number(metrics.viewCount ?? 0),
+    likeCount: Number(metrics.likeCount ?? 0),
+    githubStarCount:
+      metrics.githubStarCount === null || metrics.githubStarCount === undefined
+        ? null
+        : Number(metrics.githubStarCount),
+    githubStarsCheckedAt: metrics.githubStarsCheckedAt ?? null,
+    likedByVisitor
+  };
+}
+
 export {
+  SITE_PROFILE_KEY,
   SUPPORTED_ARTICLES,
   buildArticleStatsPayload,
+  buildSiteStatsPayload,
   normalizeRating,
   requireArticleSlug,
   validateArticleCommentInput,
