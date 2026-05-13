@@ -208,6 +208,7 @@ function Work({ t }) {
         </h2>
 
         <div className="featured">
+          <div className="featured-badge">{t.work.featuredBadge}</div>
           <div className="meta">{t.work.featured.meta}</div>
           <h3>
             {t.work.featured.title1}<br/>
@@ -236,7 +237,7 @@ function Work({ t }) {
           {t.work.others.map((p, i) => (
             <div className="proj" key={i}>
               <div className="top">
-                <span className={`status ${p.status}`}><span className="ind"></span>{p.status === "dev" ? "IN DEV" : "SHIPPED"}</span>
+                <span className={`status ${p.status}`}><span className="ind"></span>{(t.work.statusLabels && t.work.statusLabels[p.status]) || (p.status === "dev" ? "IN DEV" : "SHIPPED")}</span>
                 <span className="role">{p.role}</span>
               </div>
               <h4>{p.name}</h4>

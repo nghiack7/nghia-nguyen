@@ -406,8 +406,7 @@
     overflow: hidden;
   }
   @media (max-width: 720px) { .featured { padding: 28px; } }
-  .featured::before {
-    content: "FEATURED CASE STUDY";
+  .featured .featured-badge {
     position: absolute; top: 24px; right: 24px;
     font-family: var(--mono);
     font-size: 10px;
@@ -927,12 +926,12 @@
   <div class="wrap row">
     <div class="brand">NN<span class="dot">.</span></div>
     <ul>
-      <li><a href="#about">About</a></li>
-      <li><a href="#stack">Stack</a></li>
-      <li><a href="#experience">Experience</a></li>
-      <li><a href="#work">Work</a></li>
-      <li><a href="#writing">Writing</a></li>
-      <li><a href="#contact">Contact</a></li>
+      <li><a href="#about" data-i18n="nav.about">About</a></li>
+      <li><a href="#stack" data-i18n="nav.stack">Stack</a></li>
+      <li><a href="#experience" data-i18n="nav.experience">Experience</a></li>
+      <li><a href="#work" data-i18n="nav.work">Work</a></li>
+      <li><a href="#writing" data-i18n="nav.writing">Writing</a></li>
+      <li><a href="#contact" data-i18n="nav.contact">Contact</a></li>
     </ul>
     <div class="right">
       <button class="toggle lang" id="lang-toggle" title="Toggle language">
