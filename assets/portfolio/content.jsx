@@ -8,6 +8,7 @@ const CONTENT = {
       work: "Work",
       writing: "Writing",
       contact: "Contact",
+      cta: "Let's talk",
     },
     hero: {
       ticker: ["HO CHI MINH CITY · UTC+7", "AVAILABLE FOR LEAD ROLES", "REMOTE OK"],
@@ -19,6 +20,7 @@ const CONTENT = {
       cta1: "View Work",
       cta2: "Get In Touch",
       cta3: "Download CV",
+      live: { views: "VIEWS", stars: "★", recommend: "Recommend", recommended: "Recommended" },
     },
     marquee: [
       "GO", "•", "DISTRIBUTED SYSTEMS", "•", "POSTGRES", "•", "KAFKA", "•",
@@ -145,6 +147,7 @@ const CONTENT = {
       work: "Dự án",
       writing: "Bài viết",
       contact: "Liên hệ",
+      cta: "Trò chuyện",
     },
     hero: {
       ticker: ["TP. HỒ CHÍ MINH · UTC+7", "ĐANG MỞ CƠ HỘI LEAD", "NHẬN REMOTE"],
@@ -156,6 +159,7 @@ const CONTENT = {
       cta1: "Xem Dự Án",
       cta2: "Liên Hệ",
       cta3: "Tải CV",
+      live: { views: "LƯỢT XEM", stars: "★", recommend: "Giới thiệu", recommended: "Đã giới thiệu" },
     },
     marquee: [
       "GO", "•", "DISTRIBUTED SYSTEMS", "•", "POSTGRES", "•", "KAFKA", "•",

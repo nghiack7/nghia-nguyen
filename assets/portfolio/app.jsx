@@ -1,9 +1,96 @@
 // Main React render
 const { useState, useEffect, useRef } = React;
 
+// ---- Live engagement (observability) ----
+const VISITOR_KEY = "nghia-site-visitor-token-v1";
+const LIKED_KEY = "nghia-site-liked-v1";
+
+function getVisitorToken() {
+  let token = localStorage.getItem(VISITOR_KEY);
+  if (!token) {
+    token = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `visitor-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(VISITOR_KEY, token);
+  }
+  return token;
+}
+
+async function postSite(path) {
+  const token = getVisitorToken();
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-visitor-token": token },
+    body: JSON.stringify({ visitorToken: token }),
+  });
+  if (!res.ok) throw new Error(`request failed: ${res.status}`);
+  return res.json();
+}
+
+function fmtCount(value) {
+  if (value === null || value === undefined) return "—";
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+// Records a view, then exposes live stats + a one-shot recommend action.
+// Falls back to a read-only stats fetch if recording the view fails.
+function useSiteStats() {
+  const [stats, setStats] = useState(null);
+  const [liked, setLiked] = useState(() => localStorage.getItem(LIKED_KEY) === "1");
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const data = await postSite("/api/site-view");
+        if (alive) { setStats(data.stats); if (data.stats?.likedByVisitor) setLiked(true); }
+      } catch {
+        try {
+          const res = await fetch("/api/site-stats", { headers: { "x-visitor-token": getVisitorToken() } });
+          const data = await res.json();
+          if (alive) { setStats(data.stats); if (data.stats?.likedByVisitor) setLiked(true); }
+        } catch { /* live stats unavailable — UI degrades gracefully */ }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const recommend = async () => {
+    if (liked || pending) return;
+    setPending(true);
+    try {
+      const data = await postSite("/api/site-like");
+      setStats(data.stats);
+      setLiked(true);
+      localStorage.setItem(LIKED_KEY, "1");
+    } catch { /* keep button enabled on failure */ }
+    finally { setPending(false); }
+  };
+
+  return { stats, liked, pending, recommend };
+}
+
+function LiveHUD({ stats }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => { if (stats) setShow(true); }, [stats]);
+  if (!stats) return null;
+  return (
+    <div className={"live-hud" + (show ? " show" : "")} aria-hidden="true">
+      <span className="pulse"></span>
+      <span><span className="hud-num">{fmtCount(stats.viewCount)}</span> live</span>
+      <span className="hud-sep hud-extra">·</span>
+      <span className="hud-extra"><span className="hud-num">{fmtCount(stats.likeCount)}</span> ♥</span>
+      <span className="hud-sep hud-extra">·</span>
+      <span className="hud-extra"><span className="hud-num">{fmtCount(stats.githubStarCount)}</span> ★</span>
+    </div>
+  );
+}
+
 function App() {
   const [lang, setLang] = useState(() => localStorage.getItem("lang") || "en");
   const t = window.CONTENT[lang];
+  const site = useSiteStats();
 
   useEffect(() => {
     localStorage.setItem("lang", lang);
@@ -46,7 +133,7 @@ function App() {
 
   return (
     <>
-      <Hero t={t} />
+      <Hero t={t} site={site} />
       <Marquee items={t.marquee} />
       <About t={t} />
       <Skills t={t} />
@@ -56,18 +143,39 @@ function App() {
       <Education t={t} />
       <Contact t={t} />
       <Footer t={t} />
+      <LiveHUD stats={site.stats} />
     </>
   );
 }
 
-function Hero({ t }) {
+function Hero({ t, site }) {
+  const [pop, setPop] = useState(false);
+  const stats = site.stats;
+  const live = t.hero.live;
+
+  const onRecommend = () => {
+    if (site.liked || site.pending) return;
+    setPop(true);
+    setTimeout(() => setPop(false), 460);
+    site.recommend();
+  };
+
   return (
     <section className="hero" id="hero">
       <div className="wrap">
         <div className="ticker">
-          {t.hero.ticker.map((s, i) => (
-            <span key={i} className={i === 1 ? "live" : ""}>{s}</span>
-          ))}
+          <span>{t.hero.ticker[0]}</span>
+          <span className="live metric">
+            {stats
+              ? (<><b>{fmtCount(stats.viewCount)}</b> {live.views}</>)
+              : t.hero.ticker[1]}
+          </span>
+          {stats && stats.githubStarCount !== null && (
+            <span className="metric"><b>{fmtCount(stats.githubStarCount)}</b> {live.stars}</span>
+          )}
+          {stats && (
+            <span className="metric"><b>{fmtCount(stats.likeCount)}</b> ♥</span>
+          )}
           <span className="mono" style={{color: "var(--fg-faint)"}}>· {t.hero.tagline.toUpperCase()}</span>
         </div>
         <h1>
@@ -81,7 +189,17 @@ function Hero({ t }) {
           </div>
           <div className="ctas">
             <a className="btn primary" href="#work">{t.hero.cta1} <span className="arrow">→</span></a>
-            <a className="btn" href="#contact">{t.hero.cta2}</a>
+            <button
+              type="button"
+              className={"btn recommend" + (site.liked ? " done" : "") + (pop ? " pop" : "")}
+              onClick={onRecommend}
+              disabled={site.liked || site.pending}
+              aria-pressed={site.liked}
+            >
+              <span className="heart">{site.liked ? "♥" : "♡"}</span>
+              {site.liked ? live.recommended : live.recommend}
+              {stats && <span className="rc-count">· {fmtCount(stats.likeCount)}</span>}
+            </button>
             <a className="btn" href="/NghiaNguyen-CV.pdf" target="_blank" rel="noopener">{t.hero.cta3} ↗</a>
           </div>
         </div>

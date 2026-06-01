@@ -129,7 +129,10 @@ test("buildArticleStatsPayload derives averages and UI-friendly counts", () => {
   );
 });
 
-test("buildSiteStatsPayload normalizes nullable GitHub stars and like state", () => {
+test("buildSiteStatsPayload applies display offsets, normalizes stars and like state", () => {
+  // Views and likes carry a presentation-only baseline (views +1000, likes +50)
+  // so a freshly launched site doesn't show embarrassing counts. GitHub stars are
+  // NOT offset because visitors can verify them on the repo.
   assert.deepEqual(
     buildSiteStatsPayload({
       metrics: {
@@ -142,8 +145,8 @@ test("buildSiteStatsPayload normalizes nullable GitHub stars and like state", ()
     }),
     {
       key: SITE_PROFILE_KEY,
-      viewCount: 12,
-      likeCount: 4,
+      viewCount: 1012,
+      likeCount: 54,
       githubStarCount: null,
       githubStarsCheckedAt: null,
       likedByVisitor: true

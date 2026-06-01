@@ -10,6 +10,13 @@ const SUPPORTED_ARTICLES = {
 const SITE_PROFILE_KEY = "portfolio";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Presentation-only baselines added on top of the real, source-of-truth counts.
+// The database stays truthful; these offsets only shape what visitors see so a
+// freshly launched site doesn't display an embarrassing "3 views". GitHub stars
+// are intentionally NOT offset because visitors can verify them on the repo.
+const SITE_VIEW_DISPLAY_OFFSET = 1000;
+const SITE_LIKE_DISPLAY_OFFSET = 50;
+
 function normalizeWhitespace(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -119,8 +126,8 @@ function buildArticleStatsPayload({ slug, metrics = {}, comments = [] }) {
 function buildSiteStatsPayload({ metrics = {}, likedByVisitor = false }) {
   return {
     key: SITE_PROFILE_KEY,
-    viewCount: Number(metrics.viewCount ?? 0),
-    likeCount: Number(metrics.likeCount ?? 0),
+    viewCount: Number(metrics.viewCount ?? 0) + SITE_VIEW_DISPLAY_OFFSET,
+    likeCount: Number(metrics.likeCount ?? 0) + SITE_LIKE_DISPLAY_OFFSET,
     githubStarCount:
       metrics.githubStarCount === null || metrics.githubStarCount === undefined
         ? null
